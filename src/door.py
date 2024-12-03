@@ -5,15 +5,19 @@ if os.name == "nt":
 else:
     import RPi.GPIO as GPIO
 
-
 GPIO.setwarnings(False)
 import time
 
+#Pin used for up motion
 in1 = 24
+#Pin used for down motion
 in2 = 23
+#Pin used for powering the motor in general
 ena = 25
+#Pin used for manual open override 
 o_pin = 17
-c_pin = 4
+#Pin used for manual close override
+c_pin = 27
 
 class DOOR():
     def __init__(self):
