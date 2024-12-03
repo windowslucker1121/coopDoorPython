@@ -357,6 +357,75 @@
                         </tr>
                     </table>            
             </div>
+       
+            <div class="collapsible">
+                <h3 class="title" onclick="toggleSection('location')">Location</h3>
+                <div id="location" class="content-section">
+                    <h4>Select one of the available Locations</h4>
+                    <select id="predefined-locations" onchange="populateLocationFields()">
+                        <option value="" disabled selected>Select a location...</option>
+                        {% for loc in valid_locations %}
+                        <option value="{{ loc.name }}"
+                            data-region="{{ loc.region }}"
+                            data-timezone="{{ loc.timezone }}"
+                            data-latitude="{{ loc.latitude }}"
+                            data-longitude="{{ loc.longitude }}">
+                            {{ loc.name }} ({{ loc.region }}, {{ loc.timezone }})
+                        </option>
+                        {% endfor %}
+                    </select>
+
+                    <h4>or enter it manually: </h4>
+                    <form onsubmit="handleLocationSubmit(event)">
+                        <label for="city">City:</label>
+                        <input type="text" id="city" name="city" value="{{ location.city if location else '' }}" required><br>
+            
+                        <label for="region">Region:</label>
+                        <input type="text" id="region" name="region" value="{{ location.region if location else '' }}" required><br>
+            
+                        <label for="timezone">Timezone:</label>
+                        <input type="text" id="timezone" name="timezone" value="{{ location.timezone if location else '' }}" required><br>
+            
+                        <label for="latitude">Latitude:</label>
+                        <input type="number" step="0.000001" id="latitude" name="latitude" value="{{ location.latitude if location else '' }}" required><br>
+            
+                        <label for="longitude">Longitude:</label>
+                        <input type="number" step="0.000001" id="longitude" name="longitude" value="{{ location.longitude if location else '' }}" required><br>
+            
+                        <div class="button-container" style="margin-top: 20px;">
+                            <button class="button open" type="submit">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <script>
+                function populateLocationFields() {
+                    const dropdown = document.getElementById('predefined-locations');
+                    const selectedOption = dropdown.options[dropdown.selectedIndex];
+                    if (selectedOption) {
+                        document.getElementById('city').value = selectedOption.value;
+                        document.getElementById('region').value = selectedOption.getAttribute('data-region');
+                        document.getElementById('timezone').value = selectedOption.getAttribute('data-timezone');
+                        document.getElementById('latitude').value = selectedOption.getAttribute('data-latitude');
+                        document.getElementById('longitude').value = selectedOption.getAttribute('data-longitude');
+                    }
+                }
+
+                function handleLocationSubmit(event) {
+                    event.preventDefault();
+
+                    const city = document.getElementById('city').value;
+                    const region = document.getElementById('region').value;
+                    const timezone = document.getElementById('timezone').value;
+                    const latitude = parseFloat(document.getElementById('latitude').value);
+                    const longitude = parseFloat(document.getElementById('longitude').value);
+
+                    // Send the location data to the server via WebSocket
+                    socket.emit('update_location', { city, region, timezone, latitude, longitude });
+                }
+            </script>
+                   
         </div>
     </div>
 

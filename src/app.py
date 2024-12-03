@@ -5,6 +5,7 @@ from gevent import monkey
 from datetime import datetime, date, timedelta
 from protected_dict import protected_dict as global_vars
 from astral import LocationInfo
+from astral.geocoder import database, LocationDatabase
 from astral.sun import sun
 from gpiozero import CPUTemperature
 from door import DOOR
@@ -75,25 +76,70 @@ root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 config_filename = os.path.join(root_path, "config.yaml")
 
 def save_config():
-    # Write the values to a YAML file
     with open(config_filename, 'w') as file:
         yaml = YAML.YAML()
         to_dump = {
-            "auto_mode" : global_vars.instance().get_value("auto_mode"),
-            "sunrise_offset" : global_vars.instance().get_value("sunrise_offset"),
-            "sunset_offset" : global_vars.instance().get_value("sunset_offset")
+            "auto_mode": global_vars.instance().get_value("auto_mode"),
+            "sunrise_offset": global_vars.instance().get_value("sunrise_offset"),
+            "sunset_offset": global_vars.instance().get_value("sunset_offset"),
+            "location": global_vars.instance().get_value("location")
         }
         yaml.dump(to_dump, file)
 
 def load_config():
-    ## Load the values from the YAML file
-    config_to_set = {"auto_mode": True, "sunrise_offset": 0, "sunset_offset": 0}
-    with open(config_filename, 'r') as file:
-        yaml = YAML.YAML()
-        content = file.read()
-        yaml_config = yaml.load(content)
-        config_to_set.update(yaml_config)
-        global_vars.instance().set_values(config_to_set)
+    config_to_set = {
+        "auto_mode": True,
+        "sunrise_offset": 0,
+        "sunset_offset": 0,
+        "location": {
+            "city": "Boulder",
+            "region": "USA",
+            "timezone": "America/Denver",
+            "latitude": 40.01499,
+            "longitude": -105.27055
+        }
+    }
+    if os.path.exists(config_filename):
+        with open(config_filename, 'r') as file:
+            yaml = YAML.YAML()
+            content = file.read()
+            yaml_config = yaml.load(content)
+            config_to_set.update(yaml_config)
+    global_vars.instance().set_values(config_to_set)
+
+
+
+def get_valid_locations() -> list:
+    locations = []
+    location_database = database()
+    #print(type(location_database))
+
+    for location_name, location_info in location_database.items():
+        if isinstance(location_info, dict):
+            for sub_location_name, sub_location_info in location_info.items():
+                locations.append({
+                    "name": f"{location_name} - {sub_location_name}",
+                    "region": sub_location_info[0].region,
+                    "timezone": sub_location_info[0].timezone,
+                    "latitude": sub_location_info[0].latitude,
+                    "longitude": sub_location_info[0].longitude
+                })
+        locations.sort(key=lambda x: (x['name'], x['region']))
+    return locations
+
+def reload_location_data():
+    location = global_vars.instance().get_value("location")
+    global boulder, timezone
+
+    boulder = LocationInfo(
+        location["city"],
+        location["region"],
+        location["timezone"],
+        location["latitude"],
+        location["longitude"]
+    )
+    timezone = pytz.timezone(location["timezone"])
+
 
 def get_all_data():
     # Grab data safely from global store:
@@ -421,6 +467,33 @@ def handle_input_numbers(data):
     global_vars.instance().set_values({"sunrise_offset": int(sunrise_offset), "sunset_offset": int(sunset_offset)})
     save_config()
 
+@socketio.on('update_location')
+def handle_update_location(location_data):
+    # Extract location data from the received message
+    city = location_data.get("city")
+    region = location_data.get("region")
+    timezone = location_data.get("timezone")
+    latitude = location_data.get("latitude")
+    longitude = location_data.get("longitude")
+
+    # Update global location variables
+    new_location = {
+        "city": city,
+        "region": region,
+        "timezone": timezone,
+        "latitude": latitude,
+        "longitude": longitude
+    }
+    global_vars.instance().set_value("location", new_location)
+
+    # Save the updated location to the YAML configuration file
+    save_config()
+
+    # Reload the sunrise and sunset calculation based on new location
+    reload_location_data()
+
+    print(f"Location updated to: {new_location}")
+
 ##################################
 # Static page handlers:
 ##################################
@@ -433,7 +506,10 @@ def index():
         'index.html',
         auto_mode=global_vars.instance().get_value("auto_mode"),
         sunrise_offset=global_vars.instance().get_value("sunrise_offset"),
-        sunset_offset=global_vars.instance().get_value("sunset_offset")
+        sunset_offset=global_vars.instance().get_value("sunset_offset"),
+        location=global_vars.instance().get_value("location"),
+        valid_locations=get_valid_locations()
+
     )
 
 ##################################
@@ -441,11 +517,16 @@ def index():
 ##################################
 
 if __name__ == '__main__':
+
+    get_valid_locations()
     # Initialize the desired door state:
     global_vars.instance().set_value("desired_door_state", "stopped")
 
     # Load global configuration file into memory
     load_config()
+
+    # Reload location data for sunrise/sunset calculations
+    reload_location_data()
 
     # Start the task that manages the door:
     door_thread = Thread(target=door_task)
