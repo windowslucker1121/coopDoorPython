@@ -1,4 +1,11 @@
-import RPi.GPIO as GPIO
+import os
+
+if os.name == "nt":
+    from mock_gpio import MockGPIO as GPIO
+else:
+    import RPi.GPIO as GPIO
+
+
 GPIO.setwarnings(False)
 import time
 

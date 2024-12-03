@@ -6,7 +6,6 @@ from datetime import datetime, date, timedelta
 from protected_dict import protected_dict as global_vars
 from astral import LocationInfo
 from astral.sun import sun
-from dht22 import DHT22
 from gpiozero import CPUTemperature
 from door import DOOR
 import time
@@ -14,7 +13,19 @@ import psutil
 import pytz
 import ruamel.yaml as YAML
 import os.path
-import board
+
+if os.name != 'nt':
+    from gpiozero import CPUTemperature
+    import board
+    from dht22 import DHT22
+else:
+    from MockDHT22 import MockDHT22
+    from mock_board import MockBoard
+    from mock_temperatur import MockCPUTemperature
+    CPUTemperature = MockCPUTemperature
+    DHT22 = MockDHT22
+    board = MockBoard()
+
 
 ##################################
 # Flask configuration:
@@ -146,8 +157,8 @@ def get_all_data():
       'state': state if state is not None else "",
       'override': state if state is not None and override else "off",
       'uptime': str(get_uptime()),
-      'sunrise': sunrise.strftime("%-I:%M:%S %p") if sunrise is not None else "",
-      'sunset': sunset.strftime("%-I:%M:%S %p") if sunset is not None else "",
+      'sunrise': sunrise.strftime("%I:%M:%S %p").lstrip('0') if sunrise is not None else "",
+      'sunset': sunset.strftime("%I:%M:%S %p").lstrip('0') if sunset is not None else "",
       'tu_open': time_until_open_str if time_until_open_str is not None else "",
       'tu_close': time_until_close_str if time_until_close_str is not None else ""
     }
@@ -158,8 +169,10 @@ def get_all_data():
 ##################################
 
 def temperature_task():
-    dht_out = DHT22(data_pin=board.D21, power_pin=20)
-    dht_in = DHT22(data_pin=board.D16, power_pin=26)
+    data_pin_out = board.D21
+    data_pin_in = board.D16
+    dht_out = DHT22(data_pin_out, power_pin=20)
+    dht_in = DHT22(data_pin_in, power_pin=26)
     last_date = None
 
     # Update value in global vars, and also store min and max seen since startup:
@@ -447,6 +460,13 @@ if __name__ == '__main__':
     log_thread = Thread(target=data_log_task)
     log_thread.daemon = True
     log_thread.start()
+    
+    # Define the host and port
+    host = '0.0.0.0'
+    port = 5000
+
+    # Print the IP address and port to the console
+    print(f"Starting Flask app on {host}:{port}")
 
     # Start the Flask app
-    socketio.run(app, debug=False, host='0.0.0.0')
+    socketio.run(app, debug=False, host=host, port=port)
