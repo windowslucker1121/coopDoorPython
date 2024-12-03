@@ -19,6 +19,7 @@ if os.name != 'nt':
     import board
     from dht22 import DHT22
 else:
+    print("Running on Windows, using mock classes.")
     from MockDHT22 import MockDHT22
     from mock_board import MockBoard
     from mock_temperatur import MockCPUTemperature

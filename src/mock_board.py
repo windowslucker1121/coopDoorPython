@@ -1,5 +1,3 @@
-import os
-
 class MockBoard:
     # Define mock pin mappings as needed
     D21 = 21
