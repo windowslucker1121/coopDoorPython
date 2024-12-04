@@ -378,6 +378,8 @@ def door_task():
             
             elif door_state != d_door_state:
                 endstopTimeout = door.reference_door_endstops_ms
+                if endstopTimeout is None:
+                    endstopTimeout = 10
                 match d_door_state:
                     case "stopped":
                         if door_state in ["open", "closed"]:
