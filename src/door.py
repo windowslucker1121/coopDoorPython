@@ -28,6 +28,7 @@ class DOOR():
     def __init__(self):
         # Define state and pins used
         self.state = "stopped"
+        self.lastState = "stopped"
         self.override = False
         self.reference_door_endstops_ms = None
         self.reference_door_active = False
@@ -140,22 +141,34 @@ class DOOR():
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.LOW)
+        if self.lastState != state:
+            print("GPIO - Door stopped and is in state: " + state)
+            self.lastState = state
+
         self.state = state
-        print("GPIO - Door stopped and is in state: " + state)
+        
 
     def open(self):
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.HIGH)
+
         self.state = "opening"
-        print("GPIO - Door opening")
+
+        if self.lastState != self.state:
+            print("GPIO - Door opening")
+            self.lastState = self.state
+        
 
     def close(self):
         GPIO.output(in1, GPIO.HIGH)
         GPIO.output(in2, GPIO.HIGH)
         GPIO.output(ena, GPIO.HIGH)
         self.state = "closing"
-        print("GPIO - Door closing")
+
+        if self.lastState != self.state:
+            self.lastState = self.state
+            print("GPIO - Door closing")
 
     def open_then_stop(self):
         self.open()
