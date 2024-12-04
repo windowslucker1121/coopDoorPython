@@ -84,6 +84,7 @@ class DOOR():
         # Set the reference_endstops_set variable
         self.reference_door_endstops_ms = time_taken_ms
         self.reference_door_active = False
+        print("Referenced endstops in " + str(time_taken_ms) + "ms")
 
     # Open or close door if switch activated:
     def switch_activated(self, channel):
