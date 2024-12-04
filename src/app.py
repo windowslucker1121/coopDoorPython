@@ -14,6 +14,14 @@ import psutil
 import pytz
 import ruamel.yaml as YAML
 import os.path
+from collections import deque
+import logging
+import sys
+from queue import Queue
+from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
+from logging.handlers import QueueHandler
+
+
 
 if os.name != 'nt':
     from gpiozero import CPUTemperature
@@ -37,6 +45,8 @@ monkey.patch_all()
 app = Flask(__name__, template_folder="templates")
 app.config['SECRET_KEY'] = 'secret_key'
 socketio = SocketIO(app, async_mode='gevent')
+
+log_buffer = deque(maxlen=100)
 
 ##################################
 # Helper functions:
@@ -164,7 +174,7 @@ def get_all_data():
     # Check if time until sunrise is positive
     time_until_open_str = None
     time_until_close_str = None
-    
+
     if auto_mode == "False":
         time_until_open_str = "disabled"
         time_until_close_str = "disabled"
@@ -463,7 +473,8 @@ def data_log_task():
 
 @socketio.on('connect')
 def handle_connect():
-    pass
+    for log_entry in log_buffer:
+        socketio.emit('log', {'message': log_entry}, namespace='/')
     # socketio.start_background_task(target=data_update_task)
 
 @socketio.on('disconnect')
@@ -572,7 +583,39 @@ app.jinja_env.filters['is_number'] = is_number
 # Startup:
 ##################################
 
+#logger for the webUi Log
+class SocketIOHandler(logging.Handler):
+    def emit(self, record):
+        log_entry = self.format(record)
+        log_buffer.append(log_entry)
+        socketio.emit('log', {'message': log_entry}, namespace='/')  # Emit new log to clients
+
+def configure_logging():
+    """Configure the logging system."""
+    logger = logging.getLogger("coop_logger")
+    logger.setLevel(logging.DEBUG)
+
+    # Add SocketIO logging handler
+    socketio_handler = SocketIOHandler()
+    socketio_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(socketio_handler)
+
+    # Add StreamHandler to print logs to the console
+    console_handler = logging.StreamHandler(sys.stdout)  # Stream to console
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(console_handler)
+
+    # Redirect stdout and stderr to logger
+    sys.stdout = ThreadSafeLoggerWriter(logger, logging.INFO)
+    sys.stderr = ThreadSafeLoggerWriter(logger, logging.ERROR)
+
+    return logger
+
+
 if __name__ == '__main__':
+    configure_logging()
+
+    print("Starting Coop Controller")
 
     get_valid_locations()
     # Initialize the desired door state:

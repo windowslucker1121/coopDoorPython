@@ -220,6 +220,15 @@
             }
         });
 
+        socket.on('log', function(data) {
+            console.log('Received log:', data);
+            const logsDiv = document.getElementById('logs');
+            const newLog = document.createElement('div');
+            newLog.textContent = data.message;
+            logsDiv.appendChild(newLog);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        });
+
         function sendOpenCommand() {
             socket.emit('open');
         }
@@ -426,7 +435,15 @@
                     </form>
                 </div>
             </div>
-            
+            <div class="collapsible">
+                <h3 class="title" onclick="toggleSection('logSection')">Server Logs</h3>
+                <div id="logSection" class="container">
+                    <div class="content">
+                        <div id="logs" style="height: 300px; overflow-y: auto; background: #f9f9f9; padding: 0px; border: 1px solid #ccc; border-radius: 5px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
             <script>
                 function populateLocationFields() {
                     const dropdown = document.getElementById('predefined-locations');
