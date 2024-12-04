@@ -49,6 +49,9 @@ class DOOR():
         GPIO.setup(end_up, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(end_down, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
+        GPIO.add_event_detect(end_up, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
+        GPIO.add_event_detect(end_down, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
+
     # Reference endstops and set them in the global_vars
     def reference_endstops(self):
         self.reference_door_active = True
@@ -86,6 +89,16 @@ class DOOR():
         self.reference_door_active = False
         print("Referenced endstops in " + str(time_taken_ms) + "ms")
 
+    #endstop is hit, stop the motor
+    def endstop_hit(self, channel):
+        time.sleep(0.1)
+        endstopUpper = GPIO.input(end_up)
+        endstopLower = GPIO.input(end_down)
+        if endstopUpper == GPIO.HIGH:
+            self.stop(state="open")
+        elif endstopLower == GPIO.HIGH:
+            self.stop(state="closed")
+        
     # Open or close door if switch activated:
     def switch_activated(self, channel):
         if self.reference_door_active:
