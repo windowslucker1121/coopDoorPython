@@ -141,18 +141,21 @@ class DOOR():
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.LOW)
         self.state = state
+        print("GPIO - Door stopped and is in state: " + state)
 
     def open(self):
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.HIGH)
         GPIO.output(ena, GPIO.HIGH)
         self.state = "opening"
+        print("GPIO - Door opening")
 
     def close(self):
         GPIO.output(in1, GPIO.HIGH)
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.HIGH)
         self.state = "closing"
+        print("GPIO - Door closing")
 
     def open_then_stop(self):
         self.open()
