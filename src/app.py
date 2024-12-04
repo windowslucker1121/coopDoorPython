@@ -328,7 +328,7 @@ def door_task():
             #print("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
             # If we are in auto mode then open or close the door based on sunrise
             # or sunset times.
-            if auto_mode:
+            if auto_mode and not door_override:
                 if reference_door_endstops_ms is None:
                     print("Reference door endstops not set. Please run the reference door endstops sequence from the WebUI - disabling auto mode.")
                     global_vars.instance().set_value("auto_mode", "False")
@@ -363,6 +363,7 @@ def door_task():
 
             # If we are in override mode, then the door is being moved by the switch.
             if door_override:
+                ##TODO check how this even works, i cant see that it works at all - atleast not fully controlled by the raspberry pi
                 # See if switch is turned off, if so, stop the door.
                 door.check_if_switch_neutral()
 
@@ -489,17 +490,21 @@ def handle_disconnect():
 
 @socketio.on('open')
 def handle_open():
-    print('Open button pressed')
+    print('Open button pressed which disables auto mode')
+    global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "open")
 
 @socketio.on('close')
 def handle_close():
-    print('Close button pressed')
+    print('Close button pressed which disables auto mode')
+    
+    global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "closed")
 
 @socketio.on('stop')
 def handle_stop():
-    print('Stop button pressed')
+    print('Stop button pressed which disables auto mode')
+    global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "stopped")
 
 @socketio.on('toggle')

@@ -7,6 +7,7 @@ class MockGPIO:
     LOW = "LOW"
     PUD_DOWN = "PUD_DOWN"
     BOTH = "BOTH"
+    RISING = "RISING"
 
     def __init__(self):
         globalPins = {} 
