@@ -30,6 +30,7 @@ class DOOR():
         self.state = "stopped"
         self.lastState = "stopped"
         self.override = False
+        self.errorState = None
         self.reference_door_endstops_ms = None
         self.reference_door_active = False
 
@@ -53,8 +54,24 @@ class DOOR():
         GPIO.add_event_detect(end_up, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
         GPIO.add_event_detect(end_down, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
 
+    def clear_errorState(self):
+        self.errorState = None
+        print("Error state cleared")
+
+    def ErrorState(self, state=None):
+        if state is not None and state != self.errorState:
+            self.stop (str(state))
+            self.errorState = state
+            print("Error state set to: " + str(state) + " - Stopping all motor activity until cleared.")
+            return True
+        elif self.errorState:
+            return True
+        return False
     # Reference endstops and set them in the global_vars
     def reference_endstops(self):
+        if self.ErrorState():
+            return
+        
         self.reference_door_active = True
         print("Referencing endstops - move door to closed position.")
 
@@ -102,6 +119,9 @@ class DOOR():
         
     # Open or close door if switch activated:
     def switch_activated(self, channel):
+        if self.ErrorState():
+            return
+        
         if self.reference_door_active:
             return
         # Wait just a bit for stability, so we make sure we get
@@ -121,6 +141,8 @@ class DOOR():
 
     # When called, stops door if switch is neutral.
     def check_if_switch_neutral(self, nuetral_state="stopped"):
+        if self.ErrorState():
+            return
         if self.reference_door_active:
             return
         # Wait just a bit for stability:
@@ -149,6 +171,9 @@ class DOOR():
         
 
     def open(self):
+        if self.ErrorState():
+            return
+        
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.HIGH)
@@ -161,6 +186,9 @@ class DOOR():
         
 
     def close(self):
+        if self.ErrorState():
+            return
+        
         GPIO.output(in1, GPIO.HIGH)
         GPIO.output(in2, GPIO.HIGH)
         GPIO.output(ena, GPIO.HIGH)

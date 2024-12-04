@@ -131,7 +131,7 @@
             font-weight: bold;
             text-align: center;
             text-decoration: none;
-            color: #fff;
+            color: #ffffff;
             border: none;
             border-radius: 5px;
             cursor: pointer;
@@ -139,6 +139,9 @@
             margin-right: 10px;
         }
 
+        .button.reference {
+            background-color: #ff8c00;
+        }
         .button.stop {
             background-color: #ff6f6f;
         }
@@ -218,6 +221,13 @@
                     current_state = data.state;
                 }
             }
+            let error = data.errorstate;
+            if (error) {
+                document.getElementById('error_section').style.display = "block";
+                document.getElementById('errorMessage').textContent = error;
+            } else {
+                document.getElementById('error_section').style.display = "none";
+            }
         });
 
         socket.on('log', function(data) {
@@ -239,6 +249,10 @@
 
         function sendStopCommand() {
             socket.emit('stop');
+        }
+
+        function clearErrorCommand() {
+            socket.emit('clear_error');
         }
 
         function sendReferenceCommand() {
@@ -278,6 +292,18 @@
     <div class="container">
         <div class="content">
             <h1>Coop Door</h1>
+            <div id="error_section" class="collapsible">
+                <h3 class="title" onclick="toggleSection('errorSection')">Error State Active</h3>
+                <div id="errorSection" class="content-section">
+                    <table>
+                        <tr id="reference_buttons_div">
+                            <td><b>Current Error:</b></td>
+                            <td id="errorMessage">none</td>
+                            <td><button class="button reference" onclick="clearErrorCommand()">Clear Error</button></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
             <div class="collapsible">
                 <h3 class="title" onclick="toggleSection('door_control')">Door Control</h3>
                 <div id="door_control" class="content-section">

@@ -162,14 +162,14 @@ def get_all_data():
         sunrise, sunset, sunrise_offset, sunset_offset, \
         temp_in_min, temp_in_max, hum_in_min, hum_in_max, \
         temp_out_min, temp_out_max, hum_out_min, hum_out_max, \
-        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, \
+        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state\
         = global_vars.instance().get_values(["temp_in", "hum_in", \
             "temp_out", "hum_out", "state", "override", "cpu_temp", \
             "sunrise", "sunset", "sunrise_offset", "sunset_offset", \
             "temp_in_min", "temp_in_max", "hum_in_min", "hum_in_max", \
             "temp_out_min", "temp_out_max", "hum_out_min", "hum_out_max", \
             "cpu_temp_min", "cpu_temp_max", \
-            "reference_door_endstops_ms", "auto_mode"])
+            "reference_door_endstops_ms", "auto_mode" , "error_state"])
 
     # Check if time until sunrise is positive
     time_until_open_str = None
@@ -227,7 +227,8 @@ def get_all_data():
       'tu_open': time_until_open_str if time_until_open_str is not None else "",
       'tu_close': time_until_close_str if time_until_close_str is not None else "",
       'reference_door_endstops_ms': str(reference_door_endstops_ms) if reference_door_endstops_ms is not None else "Not set",
-      'auto_mode': auto_mode
+      'auto_mode': auto_mode,
+      'errorstate' : error_state
     }
     return data_dict
 
@@ -311,7 +312,13 @@ def door_task():
     sunset = None
 
     while True:
-        if global_vars.instance().get_value("toggle_reference_of_endstops"):
+        toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
+        
+        if clearErrorState:
+            door.clear_errorState()
+            global_vars.instance().set_value("clear_error_state", False)
+        
+        if toogle_reference_of_endstops:
             print("Referencing door endstops, waiting for completion.")
             door.reference_endstops()
             global_vars.instance().set_value("toggle_reference_of_endstops", False)
@@ -394,17 +401,19 @@ def door_task():
                             door.open()
                             door_move_count += 1
                         else:
-                            door.stop("open")
+                            door.ErrorState("Endstop not reached")
+                            global_vars.instance().set_value("desired_door_state", "stopped")
                             door_move_count = 0
                     case "closed":
                         if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
                             door.close()
                             door_move_count += 1
                         else:
-                            door.stop("closed")
+                            door.ErrorState("Endstop not reached")
+                            global_vars.instance().set_value("desired_door_state", "stopped")
                             door_move_count = 0
                     case _:
-                        door.stop()
+                        door.ErrorState("unknown state - i dont know how this could happen")
                         door_move_count = 0
                         assert False, "Unknown state: " + str(d_door_state)
 
@@ -421,12 +430,15 @@ def door_task():
             first_iter = False
             door_state = door.get_state()
             door_override = door.get_override()
+            
             global_vars.instance().set_values({ \
                 "state": door_state, \
                 "override": door_override, \
                 "sunrise": sunrise, \
-                "sunset": sunset \
+                "sunset": sunset, \
+                "error_state": door.errorState if door.ErrorState() else "" \
             })
+
             time.sleep(1.0)
 
 def data_update_task():
@@ -560,6 +572,11 @@ def handle_update_location(location_data):
 def handle_reference_endstops():
     print('Referencing endstops Socket Command')
     global_vars.instance().set_value("toggle_reference_of_endstops", True)
+
+@socketio.on('clear_error')
+def handle_clear_error():
+    print('Clearing error state')
+    global_vars.instance().set_value("clear_error_state", True)
 
 ##################################
 # Static page handlers:
