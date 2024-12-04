@@ -302,7 +302,7 @@ def temperature_task():
 def door_task():
     door = DOOR()
     door_move_count = 0
-    DOOR_MOVE_MAX = 35 # seconds
+    DOOR_MOVE_MAX_AFTER_ENDSTOPS = 1
     first_iter = True
     sunrise = None
     door_state = None
@@ -374,7 +374,10 @@ def door_task():
 
             # If the door state does not match the desired door state, then
             # we need to move the door.
+
+            
             elif door_state != d_door_state:
+                endstopTimeout = door.reference_door_endstops_ms
                 match d_door_state:
                     case "stopped":
                         if door_state in ["open", "closed"]:
@@ -384,14 +387,14 @@ def door_task():
                             door.stop()
                             door_move_count = 0
                     case "open":
-                        if door_move_count <= DOOR_MOVE_MAX:
+                        if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
                             door.open()
                             door_move_count += 1
                         else:
                             door.stop("open")
                             door_move_count = 0
                     case "closed":
-                        if door_move_count <= DOOR_MOVE_MAX:
+                        if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
                             door.close()
                             door_move_count += 1
                         else:
