@@ -10,15 +10,19 @@ GPIO.setwarnings(False)
 import time
 
 #Pin used for up motion
-in1 = 24
+in1 = 17
 #Pin used for down motion
-in2 = 23
+in2 = 27
 #Pin used for powering the motor in general
-ena = 25
+ena = 22
+#pin used for endstop up
+end_up = 23
+#pin used for endstop down
+end_down = 24
 #Pin used for manual open override 
-o_pin = 17
+o_pin = 5
 #Pin used for manual close override
-c_pin = 27
+c_pin = 6
 
 class DOOR():
     def __init__(self):
@@ -38,8 +42,12 @@ class DOOR():
         # Set up switch detection:
         GPIO.setup(o_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(c_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        
         GPIO.add_event_detect(o_pin, GPIO.BOTH, callback=self.switch_activated, bouncetime=600)
         GPIO.add_event_detect(c_pin, GPIO.BOTH, callback=self.switch_activated, bouncetime=600)
+
+        GPIO.setup(end_up, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        GPIO.setup(end_down, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
     # Reference endstops and set them in the global_vars
     def reference_endstops(self):
@@ -54,7 +62,7 @@ class DOOR():
         
         # Move to close end stop
         self.close()
-        while GPIO.input(c_pin) != GPIO.HIGH:
+        while GPIO.input(end_down) != GPIO.HIGH:
             time.sleep(0.1)
     
         start_time = time.time()
@@ -63,7 +71,7 @@ class DOOR():
         print("Referencing endstops - move door to open position.")
         # Move to open end stop
         self.open()
-        while GPIO.input(o_pin) != GPIO.HIGH:
+        while GPIO.input(end_up) != GPIO.HIGH:
             time.sleep(0.1)
 
         #get the time it took to move from closed to open in ms
