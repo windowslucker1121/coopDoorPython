@@ -145,14 +145,14 @@ class DOOR():
 
     def open(self):
         GPIO.output(in1, GPIO.LOW)
-        GPIO.output(in2, GPIO.HIGH)
+        GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.HIGH)
         self.state = "opening"
         print("GPIO - Door opening")
 
     def close(self):
         GPIO.output(in1, GPIO.HIGH)
-        GPIO.output(in2, GPIO.LOW)
+        GPIO.output(in2, GPIO.HIGH)
         GPIO.output(ena, GPIO.HIGH)
         self.state = "closing"
         print("GPIO - Door closing")
