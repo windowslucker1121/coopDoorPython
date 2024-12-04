@@ -191,6 +191,22 @@
             document.getElementById('sunset').textContent = data.sunset;
             document.getElementById('tu_open').textContent = data.tu_open;
             document.getElementById('tu_close').textContent = data.tu_close;
+            
+            var reference = document.getElementById('reference_door_endstops_ms');
+            if (reference) {
+                reference.textContent = data.reference_door_endstops_ms;
+            }
+            var isAutoMode = data.auto_mode === "True";
+            var container = document.getElementById('auto_info');
+            container.style.display = isAutoMode ? "block" : "none";
+            //set toggled state
+            var toggle = document.getElementById('toggle');
+            if (isAutoMode) {
+                toggle.classList.add('on');
+            } else {
+                toggle.classList.remove('on');
+            }
+            document.getElementById('reference_buttons_div').style.display = data.reference_door_endstops_ms != "Not set" ? "none" : "block";
             if (data.override !== "off") {
                 if (current_state !== (data.override + ".switch")) {
                     document.getElementById('state').innerHTML = `<center><img src="static/${data.override}.png" alt="${data.override}" width="90px"><br>${data.override} (via switch)</center>`;
@@ -216,10 +232,17 @@
             socket.emit('stop');
         }
 
+        function sendReferenceCommand() {
+            socket.emit('reference_endstops');
+            var container = document.getElementById('reference_buttons_div');
+            container.style.display = "none";
+        }
+
         function toggleSwitch() {
             var toggle = document.getElementById('toggle');
             toggle.classList.toggle('on');
             var isOn = toggle.classList.contains('on');
+            console.log('Toggled:', isOn);
             socket.emit('toggle', { toggle: isOn });
             var container = document.getElementById('auto_info');
             if(isOn) {
@@ -250,6 +273,11 @@
                 <h3 class="title" onclick="toggleSection('door_control')">Door Control</h3>
                 <div id="door_control" class="content-section">
                     <table>
+                        <tr id="reference_buttons_div">
+                            <td><b>Reference Endstops Travel Time in Milliseconds:</b></td>
+                            <td><span id="reference_door_endstops_ms"></span></td>
+                            <td><button class="button reference" onclick="sendReferenceCommand()">Trigger Reference Sequence</button></td>
+                        </tr>
                         <tr>
                             <td>
                                 <span id="state"></span>

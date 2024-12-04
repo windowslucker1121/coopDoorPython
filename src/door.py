@@ -1,4 +1,5 @@
 import os
+from protected_dict import protected_dict as global_vars
 
 if os.name == "nt":
     from mock_gpio import MockGPIO as GPIO
@@ -24,6 +25,8 @@ class DOOR():
         # Define state and pins used
         self.state = "stopped"
         self.override = False
+        self.reference_door_endstops_ms = None
+        self.reference_door_active = False
 
         # Set up motor controller:
         GPIO.setmode(GPIO.BCM)
@@ -38,8 +41,46 @@ class DOOR():
         GPIO.add_event_detect(o_pin, GPIO.BOTH, callback=self.switch_activated, bouncetime=600)
         GPIO.add_event_detect(c_pin, GPIO.BOTH, callback=self.switch_activated, bouncetime=600)
 
+    # Reference endstops and set them in the global_vars
+    def reference_endstops(self):
+        self.reference_door_active = True
+        print("Referencing endstops - move door to closed position.")
+
+        if os.name == "nt":
+            print("Mocking endstops because we are on windows")
+            self.reference_door_endstops_ms = 10000
+            self.reference_door_active = False
+            return
+        
+        # Move to close end stop
+        self.close()
+        while GPIO.input(c_pin) != GPIO.HIGH:
+            time.sleep(0.1)
+    
+        start_time = time.time()
+        self.stop(state="closed")
+
+        print("Referencing endstops - move door to open position.")
+        # Move to open end stop
+        self.open()
+        while GPIO.input(o_pin) != GPIO.HIGH:
+            time.sleep(0.1)
+
+        #get the time it took to move from closed to open in ms
+        end_time = time.time()
+        time_taken = end_time - start_time
+        time_taken_ms = time_taken * 1000
+
+        self.stop(state="open")
+
+        # Set the reference_endstops_set variable
+        self.reference_door_endstops_ms = time_taken_ms
+        self.reference_door_active = False
+
     # Open or close door if switch activated:
     def switch_activated(self, channel):
+        if self.reference_door_active:
+            return
         # Wait just a bit for stability, so we make sure we get
         # a good reading right after the interrupt.
         time.sleep(0.15)
@@ -57,6 +98,8 @@ class DOOR():
 
     # When called, stops door if switch is neutral.
     def check_if_switch_neutral(self, nuetral_state="stopped"):
+        if self.reference_door_active:
+            return
         # Wait just a bit for stability:
         o_read = GPIO.input(o_pin)
         c_read = GPIO.input(c_pin)
