@@ -63,6 +63,7 @@ class DOOR():
         # Move to close end stop
         self.close()
         while GPIO.input(end_down) != GPIO.HIGH:
+            print(f"Reference endstops - waiting for end_down current state: {GPIO.input(end_down)}")
             time.sleep(0.1)
     
         start_time = time.time()
