@@ -8,10 +8,23 @@
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",
-            "program": "app.py",
+            "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
+                //"PYTHONPATH": "${workspaceFolder}/venv/Scripts/python",
+                "GEVENT_SUPPORT": "True"
+            }
+        },
+        {
+            "name": "Python Debugger: Run App.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./src/app.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                //"PYTHONPATH": "${workspaceFolder}/venv/Scripts/python",
                 "GEVENT_SUPPORT": "True"
             }
         }

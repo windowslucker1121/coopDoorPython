@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, Response
 from threading import Thread, Lock
 from flask_socketio import SocketIO
 from gevent import monkey
@@ -20,6 +20,7 @@ import sys
 from queue import Queue
 from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
 from logging.handlers import QueueHandler
+from camera import Camera
 
 
 
@@ -47,7 +48,7 @@ app.config['SECRET_KEY'] = 'secret_key'
 socketio = SocketIO(app, async_mode='gevent')
 
 log_buffer = deque(maxlen=100)
-
+camera = None
 ##################################
 # Helper functions:
 ##################################
@@ -94,11 +95,15 @@ def save_config():
                 "auto_mode": global_vars.instance().get_value("auto_mode"),
                 "sunrise_offset": global_vars.instance().get_value("sunrise_offset"),
                 "sunset_offset": global_vars.instance().get_value("sunset_offset"),
-                "location": global_vars.instance().get_value("location")
+                "location": global_vars.instance().get_value("location"),
+                "csvLog": global_vars.instance().get_value("csvLog"),
+                "enable_camera" : global_vars.instance().get_value("enable_camera"),
+                "camera_index" : global_vars.instance().get_value("camera_index")
             }
             yaml.dump(to_dump, file)
 
 def load_config():
+    saveNewConfig = False
     with config_lock:
         config_to_set = {
             "auto_mode": "True",
@@ -112,7 +117,10 @@ def load_config():
                 "longitude": -105.27055
             },
             #will be used for currently not implemented stopping/starting of the logging thread
-            "csvLog": True
+            "csvLog": True,
+            "enable_camera" : False,
+            "camera_index" : 0
+            
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
@@ -120,8 +128,14 @@ def load_config():
                 content = file.read()
                 yaml_config = yaml.load(content)
                 config_to_set.update(yaml_config)
+        else:
+            saveNewConfig = True
+
         global_vars.instance().set_values(config_to_set)
 
+    if saveNewConfig:
+        print("No configuration file found, creating a new one.")
+        save_config()
 
 
 def get_valid_locations() -> list:
@@ -485,6 +499,23 @@ def data_log_task():
         last_log_file_name = log_file_name
         time.sleep(5.0)
 
+
+def generate_frames():
+    """
+    Generate frames from the camera for streaming.
+    """
+    if (global_vars.instance().get_value("enable_camera") == False):
+        return
+    
+    while True:
+        try:
+            frame = camera.get_frame()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        except RuntimeError as e:
+            print(f"Error: {e}")
+            break
+
 ##################################
 # Websocket handlers:
 ##################################
@@ -597,6 +628,30 @@ def index():
 
     )
 
+@app.route('/video_feed_test')
+def video_feed_test():
+    """
+    Route to stream the video feed from the camera.
+    """
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/video_feed')
+def video_feed():
+    """
+    Route for the main page that displays the video feed.
+    """
+    return '''
+    <html>
+        <head>
+            <title>Webcam Stream</title>
+        </head>
+        <body>
+            <h1>Live Webcam Feed</h1>
+            <img src="/video_feed_test" width="640" height="480">
+        </body>
+    </html>
+    '''
+
 @app.template_filter('is_number')
 def is_number(value):
     try:
@@ -673,7 +728,12 @@ if __name__ == '__main__':
     data_thread = Thread(target=data_update_task)
     data_thread.daemon = True
     data_thread.start()
-    
+
+    if global_vars.instance().get_value("enable_camera"):
+        camera = Camera(device_index=global_vars.instance().get_value("camera_index"))
+    else:
+        print("Camera is disabled by user configuration")
+
     # Define the host and port
     host = '0.0.0.0'
     port = 5000
