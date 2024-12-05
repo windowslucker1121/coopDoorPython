@@ -518,6 +518,8 @@ def camera_task():
             socketio.emit('camera', encoded_frame, namespace='/')
         except RuntimeError as e:
             print(f"Error: {e}")
+            print("Camera task will end now.")
+            break
         time.sleep(0.1)
 
 ##################################
