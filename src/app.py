@@ -21,6 +21,8 @@ from queue import Queue
 from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
 from logging.handlers import QueueHandler
 from camera import Camera
+import base64
+
 
 
 
@@ -176,14 +178,14 @@ def get_all_data():
         sunrise, sunset, sunrise_offset, sunset_offset, \
         temp_in_min, temp_in_max, hum_in_min, hum_in_max, \
         temp_out_min, temp_out_max, hum_out_min, hum_out_max, \
-        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state\
+        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state, camera_enabled\
         = global_vars.instance().get_values(["temp_in", "hum_in", \
             "temp_out", "hum_out", "state", "override", "cpu_temp", \
             "sunrise", "sunset", "sunrise_offset", "sunset_offset", \
             "temp_in_min", "temp_in_max", "hum_in_min", "hum_in_max", \
             "temp_out_min", "temp_out_max", "hum_out_min", "hum_out_max", \
             "cpu_temp_min", "cpu_temp_max", \
-            "reference_door_endstops_ms", "auto_mode" , "error_state"])
+            "reference_door_endstops_ms", "auto_mode" , "error_state", "enable_camera"])
 
     # Check if time until sunrise is positive
     time_until_open_str = None
@@ -242,7 +244,8 @@ def get_all_data():
       'tu_close': time_until_close_str if time_until_close_str is not None else "",
       'reference_door_endstops_ms': str(reference_door_endstops_ms) if reference_door_endstops_ms is not None else "Not set",
       'auto_mode': auto_mode,
-      'errorstate' : error_state
+      'errorstate' : error_state,
+      'camera_enabled' : str(camera_enabled)
     }
     return data_dict
 
@@ -499,22 +502,21 @@ def data_log_task():
         last_log_file_name = log_file_name
         time.sleep(5.0)
 
-
-def generate_frames():
-    """
-    Generate frames from the camera for streaming.
-    """
+def camera_task():
     if (global_vars.instance().get_value("enable_camera") == False):
+        print("Camera is disabled by configuration")
         return
     
+    camera = Camera(device_index=global_vars.instance().get_value("camera_index"))
+
     while True:
         try:
             frame = camera.get_frame()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            encoded_frame = base64.b64encode(frame).decode('utf-8')
+            socketio.emit('camera', encoded_frame, namespace='/')
         except RuntimeError as e:
             print(f"Error: {e}")
-            break
+        time.sleep(0.1)
 
 ##################################
 # Websocket handlers:
@@ -628,30 +630,6 @@ def index():
 
     )
 
-@app.route('/video_feed_test')
-def video_feed_test():
-    """
-    Route to stream the video feed from the camera.
-    """
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/video_feed')
-def video_feed():
-    """
-    Route for the main page that displays the video feed.
-    """
-    return '''
-    <html>
-        <head>
-            <title>Webcam Stream</title>
-        </head>
-        <body>
-            <h1>Live Webcam Feed</h1>
-            <img src="/video_feed_test" width="640" height="480">
-        </body>
-    </html>
-    '''
-
 @app.template_filter('is_number')
 def is_number(value):
     try:
@@ -729,10 +707,10 @@ if __name__ == '__main__':
     data_thread.daemon = True
     data_thread.start()
 
-    if global_vars.instance().get_value("enable_camera"):
-        camera = Camera(device_index=global_vars.instance().get_value("camera_index"))
-    else:
-        print("Camera is disabled by user configuration")
+    # Start the camera task
+    camera_thread = Thread(target=camera_task)
+    camera_thread.daemon = True
+    camera_thread.start()
 
     # Define the host and port
     host = '0.0.0.0'

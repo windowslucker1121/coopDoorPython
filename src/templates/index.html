@@ -239,6 +239,15 @@
             logsDiv.scrollTop = logsDiv.scrollHeight;
         });
 
+        socket.on('camera', function(data) {
+            const webcamFeed = document.getElementById('webcamFeed');
+            if (webcamFeed) {
+                webcamFeed.src = 'data:image/jpeg;base64,' + data;
+            } else {
+                console.error('Element with ID "webcamFeed" not found.');
+            }
+        });
+
         function sendOpenCommand() {
             socket.emit('open');
         }
@@ -302,6 +311,12 @@
                             <td><button class="button reference" onclick="clearErrorCommand()">Clear Error</button></td>
                         </tr>
                     </table>
+                </div>
+            </div>
+            <div class="collapsible">
+                <h3 class="title" onclick="toggleSection('webcam_section')">Webcam Livefeed</h3>
+                <div id="webcam_section" class="content-section">
+                    <img id="webcamFeed" style="width: 100%; height: auto;">
                 </div>
             </div>
             <div class="collapsible">
