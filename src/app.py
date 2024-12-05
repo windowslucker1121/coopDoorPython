@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response
+from flask import Flask, render_template, Response, send_file
 from threading import Thread, Lock
 from flask_socketio import SocketIO
 from gevent import monkey
@@ -641,6 +641,14 @@ def is_number(value):
         return True
     except Exception:
         return False
+    
+@app.route('/manifest.json')
+def serve_manifest():
+    return send_file('manifest.json', mimetype='application/manifest+json')
+
+@app.route('/sw.js')
+def serve_sw():
+    return send_file('sw.js', mimetype='application/javascript')
     
 app.jinja_env.filters['is_number'] = is_number
 ##################################
