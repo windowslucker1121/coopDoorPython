@@ -218,6 +218,9 @@ class DOOR():
         self.stop()
         self.state = "closed"
 
+    def __del__(self):
+        self.stop()
+        
 if __name__ == "__main__":
     door = DOOR()
     door.reference_endstops()
