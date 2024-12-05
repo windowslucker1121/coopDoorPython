@@ -507,7 +507,9 @@ def camera_task():
         print("Camera is disabled by configuration")
         return
     
-    camera = Camera(device_index=global_vars.instance().get_value("camera_index"))
+    cameraIndex = global_vars.instance().get_value("camera_index")
+    print(f"Starting camera task with camera index: {cameraIndex}")
+    camera = Camera(device_index=cameraIndex)
 
     while True:
         try:
