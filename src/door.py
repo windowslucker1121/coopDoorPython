@@ -73,7 +73,7 @@ class DOOR():
             return
         
         self.reference_door_active = True
-        print("Referencing endstops - move door to closed position.")
+        print("Referencing - move door to CLOSE position.")
 
         if os.name == "nt":
             print("Mocking endstops because we are on windows")
@@ -81,20 +81,25 @@ class DOOR():
             self.reference_door_active = False
             return
         
-        # Move to close end stop
+        print("Setting motor to close...")
         self.close()
         while GPIO.input(end_down) != GPIO.HIGH:
+            print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_down)))
             time.sleep(0.1)
     
+        print("Endstop hit, stopping motor")
         start_time = time.time()
         self.stop(state="closed")
 
-        print("Referencing endstops - move door to open position.")
+        print("Referencing - move door to OPEN position.")
         # Move to open end stop
+        print("Setting motor to open...")
         self.open()
         while GPIO.input(end_up) != GPIO.HIGH:
+            print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
             time.sleep(0.1)
 
+        print("Endstop hit, stopping motor")
         #get the time it took to move from closed to open in ms
         end_time = time.time()
         time_taken = end_time - start_time
@@ -109,7 +114,10 @@ class DOOR():
 
     #endstop is hit, stop the motor
     def endstop_hit(self, channel):
+        if self.reference_door_active:
+            return
         time.sleep(0.1)
+
         endstopUpper = GPIO.input(end_up)
         endstopLower = GPIO.input(end_down)
         if endstopUpper == GPIO.HIGH:
@@ -212,5 +220,4 @@ class DOOR():
 
 if __name__ == "__main__":
     door = DOOR()
-    door.close_then_stop()
-    door.open_then_stop()
+    door.reference_endstops()
