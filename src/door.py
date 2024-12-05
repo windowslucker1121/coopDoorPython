@@ -19,6 +19,10 @@ ena = 22
 end_up = 23
 #pin used for endstop down
 end_down = 24
+#use this to invert the endstop up signal
+invert_end_up = False
+invert_end_down = False
+
 #Pin used for manual open override 
 o_pin = 5
 #Pin used for manual close override
@@ -51,8 +55,8 @@ class DOOR():
         GPIO.setup(end_up, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(end_down, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
-        GPIO.add_event_detect(end_up, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
-        GPIO.add_event_detect(end_down, GPIO.RISING, callback=self.endstop_hit, bouncetime=500)
+        GPIO.add_event_detect(end_up, GPIO.BOTH, callback=self.endstop_hit, bouncetime=500)
+        GPIO.add_event_detect(end_down, GPIO.BOTH, callback=self.endstop_hit, bouncetime=500)
 
     def clear_errorState(self):
         self.errorState = None
@@ -118,11 +122,14 @@ class DOOR():
             return
         time.sleep(0.1)
 
+        compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
+        compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+
         endstopUpper = GPIO.input(end_up)
         endstopLower = GPIO.input(end_down)
-        if endstopUpper == GPIO.HIGH:
+        if endstopUpper == compareValueUpper:
             self.stop(state="open")
-        elif endstopLower == GPIO.HIGH:
+        elif endstopLower == compareValueLower:
             self.stop(state="closed")
         
     # Open or close door if switch activated:
@@ -181,6 +188,12 @@ class DOOR():
     def open(self):
         if self.ErrorState():
             return
+        upperEndStopTriggered = GPIO.input(end_up)
+        compareValue = GPIO.LOW if invert_end_up else GPIO.HIGH
+
+        if upperEndStopTriggered == compareValue:
+            self.stop(state="open")
+            return
         
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.LOW)
@@ -195,6 +208,13 @@ class DOOR():
 
     def close(self):
         if self.ErrorState():
+            return
+        
+        lowerEndStopTriggered = GPIO.input(end_down)
+        compareValue = GPIO.LOW if invert_end_down else GPIO.HIGH
+
+        if lowerEndStopTriggered == compareValue:
+            self.stop(state="closed")
             return
         
         GPIO.output(in1, GPIO.HIGH)
@@ -220,7 +240,7 @@ class DOOR():
 
     def __del__(self):
         self.stop()
-        
+
 if __name__ == "__main__":
     door = DOOR()
     door.reference_endstops()
