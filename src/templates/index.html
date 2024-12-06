@@ -222,7 +222,6 @@
 
             var reference_buttons_div = document.getElementById('reference_buttons_div');
             if (reference_buttons_div) {
-                console.log("found reference_buttons_div" + data.reference_door_endstops_ms + " + " + data.reference_door_endstops_ms != "Not set");
                 reference_buttons_div.style.display = data.reference_door_endstops_ms != "Not set" ? "none" : "block";
             }
             var isAutoMode = data.auto_mode === "True";
@@ -326,6 +325,12 @@
     <div class="container">
         <div class="content">
             <h1>Coop Door</h1>
+            <div class="content" style="display: flex; justify-content: center; align-items: center; text-align: center;">
+                <button class="button reference" id="installButton" style="display: none; font-size: 20px; border-radius: 5px; cursor: pointer;">
+                    Install this page as an App on your phone
+                </button>
+            </div>
+
             <div id="error_section" class="collapsible">
                 <h3 class="title" onclick="toggleSection('errorSection')">Error State Active</h3>
                 <div id="errorSection" class="content-section">
@@ -340,21 +345,23 @@
             </div>
             <div class="collapsible">
                 <h3 class="title" onclick="toggleSection('webcam_section')">Webcam Livefeed</h3>
-                <div id="webcam_section" class="content-section">
-                    <img id="webcamFeed" src="static/waiting.png" style="width: 100%; height: auto;">
+                <div id="webcam_section" class="content-section" style="text-align: center;">
+                    <img id="webcamFeed" src="static/waiting.png" style="width: 100%; height: auto; max-width: 500px;">
                 </div>
             </div>
             <div class="collapsible">
                 <h3 class="title" onclick="toggleSection('door_control')">Door Control</h3>
                 <div id="door_control" class="content-section">
-                    <div>
-                        <table id="reference_buttons_div" style="width: 100%; table-layout: auto;">
+                    <div >
+                        <table id="reference_buttons_div" style="display: flex; justify-content: center; align-items: center; width: 100%;">
                             <tr>
                                 <td>Endstop Traveltime in MS:</td>
                                 <td id="reference_door_endstops_ms">{none}</td>
                                 <td><button class="button reference" onclick="sendReferenceCommand()">Trigger Reference Sequence</button></td>
                             </tr>
                         </table>
+                    </div>
+                    <div>
                         <table style="width: 100%; table-layout: auto;">
                             <tr>
                                 <td>
@@ -559,6 +566,43 @@
         document.querySelectorAll('.content-section').forEach(section => {
             section.style.display = "block";
         });
+
+        let deferredPrompt;
+
+        // Listen for the `beforeinstallprompt` event
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('[PWA] beforeinstallprompt event triggered');
+            e.preventDefault(); // Prevent the default prompt
+            deferredPrompt = e; // Save the event for later
+            showInstallButton(); // Show a custom install button or popup
+        });
+
+        // Function to display a custom install button or popup
+        function showInstallButton() {
+            const installButton = document.getElementById('installButton');
+            installButton.style.display = 'block';
+        }
+
+        // Handle install button click
+        document.getElementById('installButton').addEventListener('click', () => {
+            console.log('[PWA] Install button clicked');
+            if (deferredPrompt) {
+                deferredPrompt.prompt(); // Show the install prompt
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        console.log('[PWA] User accepted the install prompt');
+                    } else {
+                        console.log('[PWA] User dismissed the install prompt');
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] App was installed');
+        });
+
     </script>
 
     <style>
