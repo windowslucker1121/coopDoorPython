@@ -601,6 +601,15 @@
 
         window.addEventListener('appinstalled', () => {
             console.log('[PWA] App was installed');
+            var installButton = document.getElementById('installButton');
+            if (installButton) {
+                installButton.style.display = 'none';
+                console.log('[PWA] Install button hidden');
+            }
+            else {
+                console.log('[PWA] Install button not found');
+            }
+            
         });
 
     </script>
