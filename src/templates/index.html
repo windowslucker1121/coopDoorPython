@@ -12,13 +12,14 @@
     <link rel="apple-touch-icon" href="{{url_for('static', filename='icons/icon_512x512.png')}}" type="image/png">
     <link rel="manifest" href="/manifest.json">
     <style>
+
+        
         .title {
             padding: 15px 0px 0px 11px;
             color: #222222;
         }
 
         .container {
-            max-width: 600px;
             margin: 0 auto;
             padding: 0 20px;
         }
@@ -192,7 +193,7 @@
         let current_state = ""
 
         socket.on('data', function(data) {
-            console.log('Received data:', data);
+            // console.log('Received data:', data);
             document.getElementById('temp_in').textContent = data.temp_in;
             document.getElementById('temp_in_min').textContent = data.temp_in_min;
             document.getElementById('temp_in_max').textContent = data.temp_in_max;
@@ -213,10 +214,16 @@
             document.getElementById('sunset').textContent = data.sunset;
             document.getElementById('tu_open').textContent = data.tu_open;
             document.getElementById('tu_close').textContent = data.tu_close;
-            
+
             var reference = document.getElementById('reference_door_endstops_ms');
             if (reference) {
                 reference.textContent = data.reference_door_endstops_ms;
+            }
+
+            var reference_buttons_div = document.getElementById('reference_buttons_div');
+            if (reference_buttons_div) {
+                console.log("found reference_buttons_div" + data.reference_door_endstops_ms + " + " + data.reference_door_endstops_ms != "Not set");
+                reference_buttons_div.style.display = data.reference_door_endstops_ms != "Not set" ? "none" : "block";
             }
             var isAutoMode = data.auto_mode === "True";
             var container = document.getElementById('auto_info');
@@ -228,7 +235,6 @@
             } else {
                 toggle.classList.remove('on');
             }
-            document.getElementById('reference_buttons_div').style.display = data.reference_door_endstops_ms != "Not set" ? "none" : "block";
             if (data.override !== "off") {
                 if (current_state !== (data.override + ".switch")) {
                     document.getElementById('state').innerHTML = `<center><img src="static/${data.override}.png" alt="${data.override}" width="90px"><br>${data.override} (via switch)</center>`;
@@ -250,7 +256,7 @@
         });
 
         socket.on('log', function(data) {
-            console.log('Received log:', data);
+            // console.log('Received log:', data);
             const logsDiv = document.getElementById('logs');
             const newLog = document.createElement('div');
             newLog.textContent = data.message;
@@ -324,7 +330,7 @@
                 <h3 class="title" onclick="toggleSection('errorSection')">Error State Active</h3>
                 <div id="errorSection" class="content-section">
                     <table>
-                        <tr id="reference_buttons_div">
+                        <tr>
                             <td><b>Current Error:</b></td>
                             <td id="errorMessage">none</td>
                             <td><button class="button reference" onclick="clearErrorCommand()">Clear Error</button></td>
@@ -341,23 +347,28 @@
             <div class="collapsible">
                 <h3 class="title" onclick="toggleSection('door_control')">Door Control</h3>
                 <div id="door_control" class="content-section">
-                    <table>
-                        <tr id="reference_buttons_div">
-                            <td><b>Reference Endstops Travel Time in Milliseconds:</b></td>
-                            <td><span id="reference_door_endstops_ms"></span></td>
-                            <td><button class="button reference" onclick="sendReferenceCommand()">Trigger Reference Sequence</button></td>
-                        </tr>
-                        <tr>
-                            <td>
-                                <span id="state"></span>
-                                <div class="button-container" style="margin-top: 20px;">
-                                    <button class="button close" onclick="sendCloseCommand()">Close</button>
-                                    <button class="button stop" onclick="sendStopCommand()">Stop</button>
-                                    <button class="button open" onclick="sendOpenCommand()">Open</button>
-                                </div>
-                            </td>
-                        </tr>
-                    </table>
+                    <div>
+                        <table id="reference_buttons_div" style="width: 100%; table-layout: auto;">
+                            <tr>
+                                <td>Endstop Traveltime in MS:</td>
+                                <td id="reference_door_endstops_ms">{none}</td>
+                                <td><button class="button reference" onclick="sendReferenceCommand()">Trigger Reference Sequence</button></td>
+                            </tr>
+                        </table>
+                        <table style="width: 100%; table-layout: auto;">
+                            <tr>
+                                <td>
+                                    <span id="state"></span>
+                                    <div class="button-container" style="margin-top: 20px;">
+                                        <button class="button close" onclick="sendCloseCommand()">Close</button>
+                                        <button class="button stop" onclick="sendStopCommand()">Stop</button>
+                                        <button class="button open" onclick="sendOpenCommand()">Open</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    
                     <div class="toggle-container" style="margin-bottom: 0px;">
                         <h4 class="title" style="margin-right: 20px; margin-top: 10px;">Auto Mode</h3>
                         <div class="toggle{% if auto_mode %} on{% endif %}" id="toggle" onclick="toggleSwitch()"></div>
@@ -459,14 +470,14 @@
                 <h3 class="title" onclick="toggleSection('location')">Location</h3>
                 <div id="location" class="content-section">
                     <h4>Select one of the available Locations</h4>
-                    <select id="predefined-locations" onchange="populateLocationFields()">
+                    <select id="predefined-locations" style="width: 100%; padding: 10px; box-sizing: border-box;" onchange="populateLocationFields()">
                         <option value="" disabled selected>Select a location...</option>
                         {% for loc in valid_locations %}
                         <option value="{{ loc.name }}"
-                            data-region="{{ loc.region }}"
-                            data-timezone="{{ loc.timezone }}"
-                            data-latitude="{{ loc.latitude }}"
-                            data-longitude="{{ loc.longitude }}">
+                                data-region="{{ loc.region }}"
+                                data-timezone="{{ loc.timezone }}"
+                                data-latitude="{{ loc.latitude }}"
+                                data-longitude="{{ loc.longitude }}">
                             {{ loc.name }} ({{ loc.region }}, {{ loc.timezone }})
                         </option>
                         {% endfor %}
