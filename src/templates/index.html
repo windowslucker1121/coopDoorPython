@@ -174,6 +174,34 @@
         .capitalize {
             text-transform: capitalize;
         }
+
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            overflow: auto; 
+            background-color: rgb(0,0,0); 
+            background-color: rgba(0,0,0,0.4); 
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto; 
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%; 
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
     </style>
     <script>
         if ('serviceWorker' in navigator) {
@@ -227,8 +255,7 @@
       </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
     <script>
-        var socket = io();
-
+         var socket = io();
         let current_state = ""
 
         socket.on('data', function(data) {
@@ -358,9 +385,66 @@
             // Send the values to the Flask app via WebSocket
             socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
         }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            //event if socket fails somehow
+            socket.on('connect_error', function(error) {
+                console.error('Failed to connect to server:', error);
+                openModal("Socket IO Connect error: " + error.message || 'Unknown error');
+            });
+
+            socket.on('connect', function() {
+                closeModal();
+            });
+
+            function openModal(additionalText = "") {
+                var modal = document.getElementById("myModal");
+                var modalBody = document.getElementById("modal-body");
+
+                fetch('static/offline.html')
+                    .then(response => response.text())
+                    .then(data => {
+                        modalBody.innerHTML = data;
+                        modal.style.display = "block";
+
+                        if (additionalText) {
+                            var modalMessageElement = document.getElementById("modal-message");
+                            var errorMessage = "\nError which you can provide to an developer: \n" + additionalText;
+                            modalMessageElement.textContent = errorMessage;
+                        }
+                    })
+                    .catch(error => console.error('Error loading offline.html:', error));
+            }
+
+            function closeModal() {
+                var modal = document.getElementById("myModal");
+                modal.style.display = "none";
+            }
+
+            // Close the modal when the user clicks on <span> (x)
+            document.querySelector('.close').onclick = function() {
+                document.getElementById("myModal").style.display = "none";
+            }
+
+            // Close the modal when the user clicks anywhere outside of the modal
+            window.onclick = function(event) {
+                var modal = document.getElementById("myModal");
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            }
+        });
     </script>
 </head>
 <body>
+    <!-- myModal is used to serve a offline page warning when we cant establish a socket io connection -->
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <span class="close" style="font-size: 48px; font-weight: bold; float: right">&times;</span>
+            <div id="modal-body"></div>
+            <div id="modal-message"></div>
+        </div>
+    </div>
     <div class="container">
         <div class="content">
             <h1>Coop Door</h1>
