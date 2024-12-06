@@ -177,13 +177,52 @@
     </style>
     <script>
         if ('serviceWorker' in navigator) {
-          window.addEventListener('load', function() {
-            navigator.serviceWorker.register("/sw.js").then(function(registration) {
-              console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            }, function(err) {
-              console.log('ServiceWorker registration failed: ', err);
+                navigator.serviceWorker.register('/sw.js').then((registration) => {
+                    console.log('[PWA] Service worker registered:', registration);
+
+                    // Listen for updates to the service worker
+                    registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    console.log('[PWA] New service worker detected:', newWorker);
+
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        // Notify the user about the update
+                        showUpdateNotification(newWorker);
+                        }
+                    });
+                    });
+                });
+                }
+
+            // Function to show update notification
+            function showUpdateNotification(newWorker) {
+            const updateBanner = document.createElement('div');
+            updateBanner.id = 'updateBanner';
+            updateBanner.style.position = 'fixed';
+            updateBanner.style.bottom = '10px';
+            updateBanner.style.left = '10px';
+            updateBanner.style.right = '10px';
+            updateBanner.style.padding = '10px';
+            updateBanner.style.backgroundColor = '#317EFB';
+            updateBanner.style.color = 'white';
+            updateBanner.style.textAlign = 'center';
+            updateBanner.style.borderRadius = '5px';
+            updateBanner.innerHTML = `
+                A new version of the app is available.
+                <button id="updateApp" style="margin-left: 10px; padding: 5px 10px; font-size: 14px; border: none; border-radius: 3px; cursor: pointer; background-color: #fff; color: #317EFB;">
+                Update Now
+                </button>
+            `;
+
+            document.body.appendChild(updateBanner);
+
+            document.getElementById('updateApp').addEventListener('click', () => {
+                if (newWorker) {
+                newWorker.postMessage('skipWaiting');
+                }
+                window.location.reload();
             });
-          });
         }
       </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
