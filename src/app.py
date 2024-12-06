@@ -710,9 +710,10 @@ if __name__ == '__main__':
     temp_thread.start()
 
     # Start the task that logs data to CSV files:
-    log_thread = Thread(target=data_log_task)
-    log_thread.daemon = True
-    log_thread.start()
+    if (global_vars.instance().get_value("csvLog") == True):
+        log_thread = Thread(target=data_log_task)
+        log_thread.daemon = True
+        log_thread.start()
 
     #start a broadcast thread for the data
     data_thread = Thread(target=data_update_task)
