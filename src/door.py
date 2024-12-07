@@ -8,6 +8,8 @@ else:
 
 GPIO.setwarnings(False)
 import time
+#timeout where the reference sequence quits if it takes too long (in seconds)
+referenceSequenceTimeout=60
 
 #Pin used for up motion
 in1 = 17
@@ -73,6 +75,7 @@ class DOOR():
         return False
     # Reference endstops and set them in the global_vars
     def reference_endstops(self) -> bool:
+
         if self.ErrorState():
             print("Error state detected, cannot reference endstops")
             self.reference_door_active = False
@@ -87,10 +90,18 @@ class DOOR():
             self.reference_door_active = False
             return True
         
+        compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+        compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
+        sequenceStartedTime = time.time()
         print("Setting motor to close...")
+        
         self.close()
-        while GPIO.input(end_down) != GPIO.HIGH:
-            print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_down)))
+        while GPIO.input(end_down) != compareValueLower:
+            # print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_down)))
+            if time.time() - sequenceStartedTime > referenceSequenceTimeout:
+                print("Reference sequence timed out - lower Endstop not hit")
+                self.reference_door_active = False
+                return False
             time.sleep(0.1)
     
         print("Endstop hit, stopping motor")
@@ -100,9 +111,14 @@ class DOOR():
         print("Referencing - move door to OPEN position.")
         # Move to open end stop
         print("Setting motor to open...")
+        sequenceStartedTime = time.time()
         self.open()
-        while GPIO.input(end_up) != GPIO.HIGH:
-            print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
+        while GPIO.input(end_up) != compareValueUpper:
+            # print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
+            if time.time() - sequenceStartedTime > referenceSequenceTimeout:
+                print("Reference sequence timed out - upper Endstop not hit")
+                self.reference_door_active = False
+                return False
             time.sleep(0.1)
 
         print("Endstop hit, stopping motor")
