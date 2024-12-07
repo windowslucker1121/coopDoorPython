@@ -342,7 +342,7 @@ def door_task():
 
             if (door.reference_endstops() == False):
                 print("Referencing door endstops failed, please check the door and try again.")
-                return
+                continue
             
             global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
             print("Referencing door endstops complete with total time: " + str(door.reference_door_endstops_ms) + "ms")
