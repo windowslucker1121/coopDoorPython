@@ -82,7 +82,8 @@ class DOOR():
             return False
         
         self.reference_door_active = True
-        print("Referencing - move door to CLOSE position.")
+        print(f"Referencing - Timeout set to {referenceSequenceTimeout} seconds.")
+        print(f"Referencing - move door to CLOSE position.")
 
         if os.name == "nt":
             print("Mocking endstops because we are on windows")
@@ -101,6 +102,7 @@ class DOOR():
             if time.time() - sequenceStartedTime > referenceSequenceTimeout:
                 print("Reference sequence timed out - lower Endstop not hit")
                 self.reference_door_active = False
+                self.ErrorState("Reference sequence timed out - lower Endstop not hit")
                 return False
             time.sleep(0.1)
     
@@ -118,6 +120,7 @@ class DOOR():
             if time.time() - sequenceStartedTime > referenceSequenceTimeout:
                 print("Reference sequence timed out - upper Endstop not hit")
                 self.reference_door_active = False
+                self.ErrorState("Reference sequence timed out - upper Endstop not hit")
                 return False
             time.sleep(0.1)
 
