@@ -1,7 +1,8 @@
-from flask import Flask, render_template, Response, send_file
+from gevent import monkey
+monkey.patch_all()
+from flask import Flask, render_template, Response, send_file, request, jsonify
 from threading import Thread, Lock
 from flask_socketio import SocketIO
-from gevent import monkey
 from datetime import datetime, date, timedelta
 from protected_dict import protected_dict as global_vars
 from astral import LocationInfo
@@ -11,6 +12,7 @@ from gpiozero import CPUTemperature
 from door import DOOR
 import time
 import psutil
+import json
 import pytz
 import ruamel.yaml as YAML
 import os.path
@@ -19,12 +21,9 @@ import logging
 import sys
 from queue import Queue
 from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
-from logging.handlers import QueueHandler
 from camera import Camera
 import base64
-
-
-
+from pywebpush import webpush, WebPushException
 
 if os.name != 'nt':
     from gpiozero import CPUTemperature
@@ -44,7 +43,7 @@ else:
 # Flask configuration:
 ##################################
 
-monkey.patch_all()
+
 app = Flask(__name__, template_folder="templates")
 app.config['SECRET_KEY'] = 'secret_key'
 socketio = SocketIO(app, async_mode='gevent')
@@ -612,6 +611,7 @@ def handle_reference_endstops():
 
 @socketio.on('clear_error')
 def handle_clear_error():
+    send_push_notification({"title": "Hello", "body": "This is a test notification"})
     print('Clearing error state')
     global_vars.instance().set_value("clear_error_state", True)
 
@@ -630,8 +630,8 @@ def index():
         sunset_offset=global_vars.instance().get_value("sunset_offset"),
         location=global_vars.instance().get_value("location"),
         valid_locations=get_valid_locations(),
-        reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms")
-
+        reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms"),
+        vapid_public_key = global_vars.instance().get_value("vapid_public_key")
     )
 
 @app.template_filter('is_number')
@@ -649,6 +649,25 @@ def serve_manifest():
 @app.route('/sw.js')
 def serve_sw():
     return send_file('sw.js', mimetype='application/javascript')
+
+@app.route('/subscribe', methods=['POST'])
+def subscribe():
+    subscription = request.json
+    print('Received subscription:', subscription)
+    currentJsonContent = None
+    if os.path.exists(".subscriptions.json"):
+        currentJsonContent = json.loads(open(".subscriptions.json").read())
+
+    if currentJsonContent is None:
+        currentJsonContent = {"subscriptions": []}
+
+    currentJsonContent["subscriptions"].append(subscription)
+
+    # Save subscription to database (not shown)
+    with open('.subscriptions.json', 'w') as f:
+        json.dump(currentJsonContent, f)
+
+    return jsonify({'message': 'Subscription successful!'})
     
 app.jinja_env.filters['is_number'] = is_number
 ##################################
@@ -683,6 +702,50 @@ def configure_logging():
 
     return logger
 
+vapid_private_key = None
+def send_push_notification(payload):
+    print("Sending push notification with payload: " + str(payload))
+    global vapid_private_key
+    if vapid_private_key is None:
+        vapid_private_key = global_vars.instance().get_value("vapid_private_key")
+        if (vapid_private_key is None):
+            print("Vapid private key not set, can't send push notification")
+            return
+        
+    # Load subscription info from file
+    subscription_info = None
+    if not os.path.exists(".subscriptions.json"):
+        print("No subscriptions file found, can't send push notification")
+        return
+    jsonContent = json.loads(open(".subscriptions.json").read())
+    vapid_claims = {"sub": "mailto:your-email@example.com"}
+    for subscription in jsonContent["subscriptions"]:
+        send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+
+def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims):
+    try:
+        webpush(
+            subscription_info,
+            data=json.dumps(payload),
+            vapid_private_key=vapid_private_key,
+            vapid_claims=vapid_claims,
+            verbose=True,
+            timeout=10
+        )
+    except Exception as ex:
+        print("Error sending push notification")
+        print(ex)
+
+def load_notification_keys():
+    secrets_filename = os.path.join(root_path, ".secrets.yaml")
+    if os.path.exists(secrets_filename):
+        with open(secrets_filename, 'r') as file:
+            yaml = YAML.YAML()
+            content = file.read()
+            yaml_config = yaml.load(content)
+            global_vars.instance().set_values(yaml_config["secrets"])
+    else:
+        print("No secrets file found - the system will missbehave without it.")
 
 if __name__ == '__main__':
     configure_logging()
@@ -690,6 +753,9 @@ if __name__ == '__main__':
     print("Starting Coop Controller")
 
     get_valid_locations()
+
+    load_notification_keys()
+
     # Initialize the desired door state:
     global_vars.instance().set_value("desired_door_state", "stopped")
 

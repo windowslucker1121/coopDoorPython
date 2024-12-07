@@ -17,3 +17,5 @@ instance/
 venv/
 .DS_Store
 config.yaml
+.secrets.yaml
+.subscriptions.json

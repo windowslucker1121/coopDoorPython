@@ -98,3 +98,32 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(event.request));
   }
 });
+
+
+// sw.js
+self.addEventListener('push', (event) => {
+  console.log('[Service Worker] Push received.');
+
+  const data = event.data ? event.data.json() : {};
+  const title = data.title || 'Default Title';
+  const options = {
+    body: data.body || 'Default body text',
+    icon: '/static/icons/icon_192x192.png',
+    badge: '/static/icons/icon_144x144.png',
+    data: data.url || '/', // Link when the notification is clicked
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  console.log('[Service Worker] Notification click Received.');
+
+  event.notification.close();
+
+  event.waitUntil(
+    clients.openWindow(event.notification.data)
+  );
+});
