@@ -24,6 +24,7 @@ from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
 from camera import Camera
 import base64
 from pywebpush import webpush, WebPushException
+import atexit
 
 if os.name != 'nt':
     from gpiozero import CPUTemperature
@@ -415,7 +416,7 @@ def door_task():
                         print(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
                     if (door.reference_door_endstops_ms is not None):
                         print(f"Endstop timeout set to: {endstopTimeout} seconds")
-                        endstopTimeout = door.reference_door_endstops_ms * 0.001 + DOOR_MOVE_MAX_AFTER_ENDSTOPS
+                        endstopTimeout = door.reference_door_endstops_ms * 0.001
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
@@ -695,6 +696,11 @@ class SocketIOHandler(logging.Handler):
         log_buffer.append(log_entry)
         socketio.emit('log', {'message': log_entry}, namespace='/')  # Emit new log to clients
 
+def exitHandler(stdout,stderr):
+    sys.stdout = stdout
+    sys.stderr = stderr
+    print("Exiting Coop Controller")
+
 def configure_logging():
     """Configure the logging system."""
     logger = logging.getLogger("coop_logger")
@@ -710,6 +716,7 @@ def configure_logging():
     console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(console_handler)
 
+    atexit.register(exitHandler, sys.stdout, sys.stderr)
     # Redirect stdout and stderr to logger
     sys.stdout = ThreadSafeLoggerWriter(logger, logging.INFO)
     sys.stderr = ThreadSafeLoggerWriter(logger, logging.ERROR)
