@@ -22,6 +22,7 @@ from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
 from logging.handlers import QueueHandler
 from camera import Camera
 import base64
+from secretsReader import SecretsReader
 
 
 
@@ -100,7 +101,8 @@ def save_config():
                 "location": global_vars.instance().get_value("location"),
                 "csvLog": global_vars.instance().get_value("csvLog"),
                 "enable_camera" : global_vars.instance().get_value("enable_camera"),
-                "camera_index" : global_vars.instance().get_value("camera_index")
+                "camera_index" : global_vars.instance().get_value("camera_index"),
+                "pwa_enable_notifications" : global_vars.instance().get_value("pwa_enable_notifications")
             }
             yaml.dump(to_dump, file)
 
@@ -121,8 +123,8 @@ def load_config():
             #will be used for currently not implemented stopping/starting of the logging thread
             "csvLog": True,
             "enable_camera" : False,
-            "camera_index" : 0
-            
+            "camera_index" : 0,
+            "pwa_enable_notifications" : False
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
@@ -622,7 +624,9 @@ def handle_clear_error():
 # Route for the home page
 @app.route('/')
 def index():
-    # Render the template with temperature and humidity values
+    pubKey = global_vars.instance().get_value("vapid_public_key")
+    vapid_public_key = base64.urlsafe_b64encode(base64.b64decode(pubKey)).decode('utf-8').rstrip('=')
+
     return render_template(
         'index.html',
         auto_mode=global_vars.instance().get_value("auto_mode"),
@@ -630,8 +634,8 @@ def index():
         sunset_offset=global_vars.instance().get_value("sunset_offset"),
         location=global_vars.instance().get_value("location"),
         valid_locations=get_valid_locations(),
-        reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms")
-
+        reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms"),
+        vapid_public_key=vapid_public_key
     )
 
 @app.template_filter('is_number')
@@ -724,6 +728,24 @@ if __name__ == '__main__':
     camera_thread = Thread(target=camera_task)
     camera_thread.daemon = True
     camera_thread.start()
+
+
+    if (global_vars.instance().get_value("pwa_enable_notifications") == True):
+        secretsPath = os.path.join(root_path, ".secrets.yaml")
+        if os.path.exists(secretsPath):
+            secrets = SecretsReader(secretsPath).read_secrets()
+            global_vars.instance().set_value("vapid_public_key", secrets["vapid_public_key"])
+            if "public_key" in secrets and "private_key" in secrets:
+                pass
+                # print("Starting PWA notification service")
+                # from pwa import PwaNotificationService
+                # pwaService = PwaNotificationService(secrets["pwa_public_key"], secrets["pwa_private_key"])
+                # pwaService.start()
+            else:
+                print("PWA public and private key not found in secrets file, skipping PWA service")
+        else:
+            print("No secrets file found, skipping PWA service")
+        
 
     # Define the host and port
     host = '0.0.0.0'

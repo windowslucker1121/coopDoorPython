@@ -98,3 +98,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(event.request));
   }
 });
+
+
+self.addEventListener('push', function(event) {
+  const data = event.data.json();
+  self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || '/static/icons/icon_144x144.png'
+  });
+});
