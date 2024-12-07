@@ -1,3 +1,5 @@
+#this needs to be at the top of the gevent because the threads somehow interfere - i dont know why but this is the solution for now
+from door import DOOR
 from gevent import monkey
 monkey.patch_all()
 from flask import Flask, render_template, Response, send_file, request, jsonify
@@ -9,7 +11,6 @@ from astral import LocationInfo
 from astral.geocoder import database, LocationDatabase
 from astral.sun import sun
 from gpiozero import CPUTemperature
-from door import DOOR
 import time
 import psutil
 import json
