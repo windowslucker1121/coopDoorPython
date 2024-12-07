@@ -20,8 +20,6 @@ import os.path
 from collections import deque
 import logging
 import sys
-from queue import Queue
-from ThreadSafeLoggerWriter import ThreadSafeLoggerWriter
 from camera import Camera
 import base64
 from pywebpush import webpush, WebPushException
@@ -328,10 +326,16 @@ def door_task():
     door_override = None
     sunrise = None
     sunset = None
+    door.ErrorState("test")
 
     while True:
         toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
-        
+    
+        generateError = global_vars.instance().get_value("debug_error")
+        if generateError:
+            door.ErrorState("Test Error")
+            global_vars.instance().set_value("debug_error", False)
+            
         if clearErrorState:
             door.clear_errorState()
             global_vars.instance().set_value("clear_error_state", False)
@@ -631,6 +635,11 @@ def handle_clear_error():
     print('Clearing error state')
     global_vars.instance().set_value("clear_error_state", True)
 
+@socketio.on('generate_error')
+def handle_generate_error():
+    print('Generating error state')
+    global_vars.instance().set_value("debug_error", True)
+
 ##################################
 # Static page handlers:
 ##################################
@@ -704,45 +713,52 @@ def exitHandler(stdout,stderr):
 
 def configure_logging():
     """Configure the logging system."""
-    logger = logging.getLogger("coop_logger")
-    logger.setLevel(logging.DEBUG)
+    
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    rootLogger = logging.getLogger()
+    rootLogger.setLevel(logging.INFO)
 
     # Add SocketIO logging handler
     socketio_handler = SocketIOHandler()
-    socketio_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(socketio_handler)
+    socketio_handler.setFormatter(formatter)
+    rootLogger.addHandler(socketio_handler)
 
     # Add StreamHandler to print logs to the console
-    console_handler = logging.StreamHandler(sys.stdout)  # Stream to console
-    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(console_handler)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    rootLogger.addHandler(console_handler)
 
-    atexit.register(exitHandler, sys.stdout, sys.stderr)
-    # Redirect stdout and stderr to logger
-    sys.stdout = ThreadSafeLoggerWriter(logger, logging.INFO)
-    sys.stderr = ThreadSafeLoggerWriter(logger, logging.ERROR)
+    stderrHandler = logging.StreamHandler(sys.stderr)
+    stderrHandler.setFormatter(formatter)
+    rootLogger.addHandler(stderrHandler)
 
-    return logger
+    return rootLogger
 
 vapid_private_key = None
 def send_push_notification(payload):
-    print("Sending push notification with payload: " + str(payload))
-    global vapid_private_key
-    if vapid_private_key is None:
-        vapid_private_key = global_vars.instance().get_value("vapid_private_key")
-        if (vapid_private_key is None):
-            print("Vapid private key not set, can't send push notification")
+    try:
+        print("Sending push notification with payload: " + str(payload))
+        global vapid_private_key
+        if vapid_private_key is None:
+            vapid_private_key = global_vars.instance().get_value("vapid_private_key")
+            if vapid_private_key is None:
+                print("Vapid private key not set, can't send push notification")
+                return
+
+        # Load subscription info from file
+        if not os.path.exists(".subscriptions.json"):
+            print("No subscriptions file found, can't send push notification")
             return
-        
-    # Load subscription info from file
-    subscription_info = None
-    if not os.path.exists(".subscriptions.json"):
-        print("No subscriptions file found, can't send push notification")
-        return
-    jsonContent = json.loads(open(".subscriptions.json").read())
-    vapid_claims = {"sub": "mailto:your-email@example.com"}
-    for subscription in jsonContent["subscriptions"]:
-        send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+
+        jsonContent = json.loads(open(".subscriptions.json").read())
+        vapid_claims = {"sub": "mailto:your-email@example.com"}
+
+        for subscription in jsonContent.get("subscriptions", []):
+            send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+    except Exception as e:
+        print(f"Error in send_push_notification: {e}")
+
 
 def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims):
     try:
@@ -754,9 +770,14 @@ def send_individual_push_notification(subscription_info, payload, vapid_private_
             verbose=True,
             timeout=10
         )
+    except WebPushException as ex:
+        #TODO remove subscription if it is not valid anymore
+        print(f"WebPushException occurred: {ex}")
+        print(f"Response: {getattr(ex, 'response', None)}")
+        print(f"Status: {getattr(ex, 'status_code', None)}")
     except Exception as ex:
-        print("Error sending push notification")
-        print(ex)
+        print(f"General Exception occurred while sending push notification: {ex}")
+
 
 def load_notification_keys():
     secrets_filename = os.path.join(root_path, ".secrets.yaml")
@@ -770,8 +791,8 @@ def load_notification_keys():
         print("No secrets file found - the system will missbehave without it.")
 
 if __name__ == '__main__':
-    configure_logging()
-
+    # configure_logging()
+    # logging.basicConfig(level=logging.DEBUG)
     print("Starting Coop Controller")
 
     get_valid_locations()
