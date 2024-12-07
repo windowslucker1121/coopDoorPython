@@ -336,8 +336,12 @@ def door_task():
         
         if toogle_reference_of_endstops:
             print("Referencing door endstops, waiting for completion.")
-            door.reference_endstops()
             global_vars.instance().set_value("toggle_reference_of_endstops", False)
+
+            if (door.reference_endstops() == False):
+                print("Referencing door endstops failed, please check the door and try again.")
+                return
+            
             global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
             print("Referencing door endstops complete with total time: " + str(door.reference_door_endstops_ms) + "ms")
         else:
@@ -401,37 +405,47 @@ def door_task():
 
             
             elif door_state != d_door_state:
-                endstopTimeout = door.reference_door_endstops_ms
-                if endstopTimeout is None:
-                    endstopTimeout = 10
-                match d_door_state:
-                    case "stopped":
-                        if door_state in ["open", "closed"]:
-                            door.stop(door_state)
+                if (door.ErrorState()):
+                    door.stop()
+                    door_move_count = 0
+                else:
+                    endstopTimeout = door.reference_door_endstops_ms
+                    if endstopTimeout is None:
+                        endstopTimeout = 10
+                        print(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
+                    if (door.reference_door_endstops_ms is not None):
+                        print(f"Endstop timeout set to: {endstopTimeout} seconds")
+                        endstopTimeout = door.reference_door_endstops_ms * 0.001 + DOOR_MOVE_MAX_AFTER_ENDSTOPS
+                    match d_door_state:
+                        case "stopped":
+                            if door_state in ["open", "closed"]:
+                                door.stop(door_state)
+                                door_move_count = 0
+                            else:
+                                door.stop()
+                                door_move_count = 0
+                        case "open":
+                            if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
+                                print(f"OPEN: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                door.open()
+                                door_move_count += 1
+                            else:
+                                door.ErrorState("Endstop not reached")
+                                global_vars.instance().set_value("desired_door_state", "stopped")
+                                door_move_count = 0
+                        case "closed":
+                            if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
+                                print(f"CLOSE: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                door.close()
+                                door_move_count += 1
+                            else:
+                                door.ErrorState("Endstop not reached")
+                                global_vars.instance().set_value("desired_door_state", "stopped")
+                                door_move_count = 0
+                        case _:
+                            door.ErrorState("unknown state - i dont know how this could happen")
                             door_move_count = 0
-                        else:
-                            door.stop()
-                            door_move_count = 0
-                    case "open":
-                        if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
-                            door.open()
-                            door_move_count += 1
-                        else:
-                            door.ErrorState("Endstop not reached")
-                            global_vars.instance().set_value("desired_door_state", "stopped")
-                            door_move_count = 0
-                    case "closed":
-                        if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
-                            door.close()
-                            door_move_count += 1
-                        else:
-                            door.ErrorState("Endstop not reached")
-                            global_vars.instance().set_value("desired_door_state", "stopped")
-                            door_move_count = 0
-                    case _:
-                        door.ErrorState("unknown state - i dont know how this could happen")
-                        door_move_count = 0
-                        assert False, "Unknown state: " + str(d_door_state)
+                            assert False, "Unknown state: " + str(d_door_state)
 
             # We are not in switch override, and the door is in the desired state. The door should be
             # stopped. We can do this most robustly by also checking the switch, which will stop the door

@@ -66,15 +66,17 @@ class DOOR():
         if state is not None and state != self.errorState:
             self.stop (str(state))
             self.errorState = state
-            print("Error state set to: " + str(state) + " - Stopping all motor activity until cleared.")
+            print("Error state set to: " + str(state) + " - Stopping all motor activity until error is cleared.")
             return True
         elif self.errorState:
             return True
         return False
     # Reference endstops and set them in the global_vars
-    def reference_endstops(self):
+    def reference_endstops(self) -> bool:
         if self.ErrorState():
-            return
+            print("Error state detected, cannot reference endstops")
+            self.reference_door_active = False
+            return False
         
         self.reference_door_active = True
         print("Referencing - move door to CLOSE position.")
@@ -83,7 +85,7 @@ class DOOR():
             print("Mocking endstops because we are on windows")
             self.reference_door_endstops_ms = 10000
             self.reference_door_active = False
-            return
+            return True
         
         print("Setting motor to close...")
         self.close()
@@ -115,6 +117,7 @@ class DOOR():
         self.reference_door_endstops_ms = time_taken_ms
         self.reference_door_active = False
         print("Referenced endstops in " + str(time_taken_ms) + "ms")
+        return True
 
     #endstop is hit, stop the motor
     def endstop_hit(self, channel):
