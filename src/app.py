@@ -737,6 +737,8 @@ def configure_logging():
 
 vapid_private_key = None
 def send_push_notification(payload):
+    jsonContent = None
+    toRemove = []
     try:
         print("Sending push notification with payload: " + str(payload))
         global vapid_private_key
@@ -755,12 +757,24 @@ def send_push_notification(payload):
         vapid_claims = {"sub": "mailto:your-email@example.com"}
 
         for subscription in jsonContent.get("subscriptions", []):
-            send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+            valid = send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+            if not valid:
+                toRemove.append(subscription)
     except Exception as e:
         print(f"Error in send_push_notification: {e}")
+    
+    for remove in toRemove:
+        jsonContent["subscriptions"].remove(remove)
+
+    try:
+        with open('.subscriptions.json', 'w') as f:
+            json.dump(jsonContent, f)
+    except Exception as e:
+        print(f"Error in removing invalid subscriptions from file: {e}")
+    
 
 
-def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims):
+def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims) -> bool:
     try:
         webpush(
             subscription_info,
@@ -773,10 +787,18 @@ def send_individual_push_notification(subscription_info, payload, vapid_private_
     except WebPushException as ex:
         #TODO remove subscription if it is not valid anymore
         print(f"WebPushException occurred: {ex}")
-        print(f"Response: {getattr(ex, 'response', None)}")
-        print(f"Status: {getattr(ex, 'status_code', None)}")
+        responseCode = getattr(ex, 'response', None)
+        
+        if responseCode is not None:
+            if responseCode.status_code == 410:
+                print("Subscription is no longer valid, removing it.")
+                return False
+        else:
+            print(f"Response: {responseCode}")
+            print(f"Status: {getattr(ex, 'status_code', None)}")
     except Exception as ex:
-        print(f"General Exception occurred while sending push notification: {ex}")
+        print(f"General Exception occurred while sending push notification: {ex}")#
+    return True
 
 
 def load_notification_keys():
