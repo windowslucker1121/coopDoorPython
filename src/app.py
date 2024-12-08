@@ -416,7 +416,7 @@ def door_task():
                     door.stop()
                     door_move_count = 0
                     if (sentErrorNotification == False):
-                        send_push_notification({"title": "Door Error", "message": "The door is in an error state, please check the door."})
+                        send_push_notification({"title": "Door Error", "body": "The door is in an error state, please check the door."})
                         sentErrorNotification = True
                 else:
                     endstopTimeout = door.reference_door_endstops_ms
@@ -739,9 +739,10 @@ def configure_logging():
     return rootLogger
 
 vapid_private_key = None
-def send_push_notification(payload):
+def send_push_notification(title : str, body : str):
     jsonContent = None
     toRemove = []
+    payload = {"title": title, "body": body}
     try:
         print("Sending push notification with payload: " + str(payload))
         global vapid_private_key
