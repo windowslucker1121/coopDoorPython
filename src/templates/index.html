@@ -12,127 +12,113 @@
     <link rel="apple-touch-icon" href="{{url_for('static', filename='icons/icon_512x512.png')}}" type="image/png">
     <link rel="manifest" href="/manifest.json">
     <style>
-
-        
-        .title {
-            padding: 15px 0px 0px 11px;
-            color: #222222;
+        :root {
+            --background-color: #f5f5f5;
+            --text-color: #222;
+            --content-background: #fff;
+            --header-background: #f9f9f9;
+            --header-hover: #e9e9e9;
+            --border-color: #ccc;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --modal-overlay: rgba(0, 0, 0, 0.4);
+    
+            --log-background: #f9f9f9;
+            --log-border: #ccc;
+    
+            --button-reference-bg: #ff8c00;
+            --button-stop-bg: #ff6f6f;
+            --button-open-bg: #90d590;
+            --button-close-bg: #999;
+            --button-text-color: #fff;
         }
-
+    
+        [data-theme="dark"] {
+            --background-color: #222;
+            --text-color: #fff;
+            --content-background: #333;
+            --header-background: #444;
+            --header-hover: #555;
+            --border-color: #666;
+            --shadow-color: rgba(255, 255, 255, 0.1);
+            --modal-overlay: rgba(255, 255, 255, 0.2);
+    
+            --log-background: #333;
+            --log-border: #555;
+    
+            --button-reference-bg: #ff8c00;
+            --button-stop-bg: #ff3f3f;
+            --button-open-bg: #3fa85f;
+            --button-close-bg: #555;
+            --button-text-color: #fff;
+        }
+    
+        body {
+            font-family: Arial, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+    
         .container {
             margin: 0 auto;
             padding: 0 20px;
         }
-
+    
         .content {
-            background-color: #fff;
+            background-color: var(--content-background);
+            color: var(--text-color);
             padding: 20px;
             border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 0 10px var(--shadow-color);
         }
-
-        @media (max-width: 600px) {
-            .container {
-                padding: 0;
-            }
-        }
-
-        .toggle-container {
-            padding: 0px;
-            display: flex;
-            align-items: center;
-        }
-
-        .toggle {
-            width: 50px;
-            height: 25px;
-            background-color: #aaa;
-            border-radius: 25px;
-            position: relative;
-            cursor: pointer;
-        }
-
-        .toggle:before {
-            content: "";
-            position: absolute;
-            top: 1px;
-            left: 1px;
-            width: 23px;
-            height: 23px;
-            background-color: #fff;
-            border-radius: 50%;
-            transition: transform 0.3s ease;
-        }
-
-        .toggle.on {
-          background-color: #90d590;
-        }
-
-        .toggle.on:before {
-            transform: translateX(25px);
-        }
-
-        .toggle-label {
-            margin-left: 10px;
-            font-size: 20px;
-        }
-
-        .auto_info {
-          display: none;
-        }
-
-        .auto_info.on {
-          display: block;
-        }
-
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f5f5f5;
-            margin: 0;
-            padding: 20px;
-        }
-
+    
         h1 {
             text-align: center;
-            color: #333;
+            color: var(--text-color);
         }
-
+    
         table {
             border-collapse: collapse;
             width: 100%;
-            background-color: #fff;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            background-color: var(--content-background);
+            box-shadow: 0 0 10px var(--shadow-color);
             border-radius: 5px;
             overflow: hidden;
             margin-top: 20px;
         }
-
-        td:first-child {
-            width: 35%;
-        }
-
+    
         th, td {
             padding: 15px 10px;
             text-align: left;
-            border-bottom: 1px solid #ddd;
-            color: #444444;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
         }
-
+    
         th {
-            background-color: #f2f2f2;
-            color: #555;
+            background-color: var(--header-background);
+            color: var(--text-color);
         }
-
+    
         tr:hover {
-            background-color: #f9f9f9;
+            background-color: var(--header-hover);
         }
-
-        .button-container {
-            display: flex;
-            justify-content: center;
-            margin-top: 10px;
+    
+        .collapsible h3 {
+            cursor: pointer;
+            padding: 10px;
+            margin: 0;
+            background-color: var(--header-background);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            transition: background-color 0.3s;
         }
-
+    
+        .collapsible h3:hover {
+            background-color: var(--header-hover);
+        }
+    
         .button {
             display: inline-block;
             padding: 10px 20px;
@@ -140,69 +126,115 @@
             font-weight: bold;
             text-align: center;
             text-decoration: none;
-            color: #ffffff;
+            color: var(--button-text-color);
             border: none;
             border-radius: 5px;
             cursor: pointer;
             transition: background-color 0.3s ease;
             margin-right: 10px;
         }
-
+    
         .button.reference {
-            background-color: #ff8c00;
+            background-color: var(--button-reference-bg);
         }
+    
         .button.stop {
-            background-color: #ff6f6f;
+            background-color: var(--button-stop-bg);
         }
-
+    
         .button.open {
-            background-color: #90d590;
+            background-color: var(--button-open-bg);
         }
-
+    
         .button.close {
-            background-color: #999;
+            background-color: var(--button-close-bg);
         }
-
-        .button:last-child {
-            margin-right: 0;
-        }
-
+    
         .button:hover {
             opacity: 0.8;
         }
-
-        .capitalize {
-            text-transform: capitalize;
-        }
-
+    
         .modal {
-            display: none; 
-            position: fixed; 
-            z-index: 1; 
+            display: none;
+            position: fixed;
+            z-index: 1;
             left: 0;
             top: 0;
-            width: 100%; 
-            height: 100%; 
-            overflow: auto; 
-            background-color: rgb(0,0,0); 
-            background-color: rgba(0,0,0,0.4); 
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: var(--modal-overlay);
         }
-
+    
         .modal-content {
-            background-color: #fefefe;
-            margin: 15% auto; 
+            background-color: var(--content-background);
+            color: var(--text-color);
+            margin: 15% auto;
             padding: 20px;
-            border: 1px solid #888;
-            width: 80%; 
+            border: 1px solid var(--border-color);
+            width: 80%;
+        }
+    
+        #logs {
+            height: 300px;
+            overflow-y: auto;
+            background-color: var(--log-background);
+            color: var(--text-color);
+            padding: 10px;
+            border: 1px solid var(--log-border);
+            border-radius: 5px;
+        }
+    
+        .toggle-theme-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: var(--content-background);
+            color: var(--text-color);
+            font-weight: bold;
+            transition: background-color 0.3s, color 0.3s;
+        }
+    
+        .toggle-theme-btn:hover {
+            opacity: 0.8;
         }
 
-        .close:hover,
-        .close:focus {
-            color: black;
-            text-decoration: none;
+        .toggle {
+            width: 50px;
+            height: 25px;
+            background-color: var(--border-color); /* Default background */
+            border-radius: 25px;
+            position: relative;
             cursor: pointer;
+            transition: background-color 0.3s ease;
         }
+
+        .toggle:before {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 21px;
+            height: 21px;
+            background-color: var(--content-background); /* Handle color */
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle.on {
+            background-color: var(--button-open-bg); /* Active background */
+        }
+
+        .toggle.on:before {
+            transform: translateX(25px); /* Move handle */
+        }
+
     </style>
+    
     <script>
         if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/sw.js').then((registration) => {
@@ -424,17 +456,15 @@
         }
 
         function toggleSwitch() {
-            var toggle = document.getElementById('toggle');
-            toggle.classList.toggle('on');
-            var isOn = toggle.classList.contains('on');
-            console.log('Toggled:', isOn);
-            socket.emit('toggle', { toggle: isOn });
-            var container = document.getElementById('auto_info');
-            if(isOn) {
-                container.style.display = "block";
-            } else {
-                container.style.display = "none";
-            }
+            const toggle = document.getElementById('toggle');
+            toggle.classList.toggle('on'); 
+            const isOn = toggle.classList.contains('on'); 
+
+            // console.log('Toggled:', isOn);
+            socket.emit('toggle', { toggle: isOn }); // Emit the state to the server
+            
+            const container = document.getElementById('auto_info');
+            container.style.display = isOn ? 'block' : 'none';
         }
 
         // Function to handle form submission
@@ -452,7 +482,10 @@
         socket.on('csv_data', function(data) {
 
             console.log('Received CSV data:', data);
-            const ctx = document.getElementById('dataChart').getContext('2d');
+            const dataChartItem = document.getElementById('dataChart');
+            dataChartItem.style.display = 'block';
+
+            const ctx = dataChartItem.getContext('2d');
 
             // Dynamic CSV parser
             function parseCSV(csvArray) {
@@ -503,7 +536,7 @@
                     responsive: true,
                     plugins: {
                         legend: {
-                            position: 'top',
+                            position: 'bottom',
                         },
                         tooltip: {
                             mode: 'index',
@@ -582,8 +615,25 @@
                     modal.style.display = "none";
                 }
             }
+
+            const themeButton = document.getElementById('toggleTheme');
+
+            // Check the user's previously saved theme preference
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', currentTheme);
+
+            themeButton.textContent = currentTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+
+            themeButton.addEventListener('click', () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme); // Save the user's preference
+                themeButton.textContent = newTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+            });
         });
     </script>
+    
 </head>
 <body>
     <!-- myModal is used to serve a offline page warning when we cant establish a socket io connection -->
@@ -594,9 +644,13 @@
             <div id="modal-message"></div>
         </div>
     </div>
+    <div>
+        <button class="toggle-theme-btn" id="toggleTheme">🌙 Dark Mode</button>
+    </div>
+
     <div class="container">
         <div class="content">
-            <h1>Coop Door asdsas</h1>
+            <h1>Coop Door</h1>
             <div>
                 <button class="button reference" onclick="generateError()" id="generateError" style="display: block; font-size: 20px; border-radius: 5px; cursor: pointer;">
                     Generate Error
@@ -639,7 +693,7 @@
                         </table>
                     </div>
                     <div>
-                        <table style="width: 100%; table-layout: auto;">
+                        <table style="width: 100%; table-layout: auto; display: flex; justify-content: center; align-items: center; text-align: center;">
                             <tr>
                                 <td>
                                     <span id="state"></span>
@@ -653,10 +707,11 @@
                         </table>
                     </div>
                     
-                    <div class="toggle-container" style="margin-bottom: 0px;">
-                        <h4 class="title" style="margin-right: 20px; margin-top: 10px;">Auto Mode</h3>
-                        <div class="toggle{% if auto_mode %} on{% endif %}" id="toggle" onclick="toggleSwitch()"></div>
+                    <div class="toggle-container" style="margin-bottom: 10px; display: flex; align-items: center;">
+                        <h4 class="title" style="margin-right: 20px;">Auto Mode</h4>
+                        <div class="toggle" id="toggle" onclick="toggleSwitch()"></div>
                     </div>
+
                     <div id="auto_info" class="auto_info {% if auto_mode %} on{% endif %}">
                         <table style="margin-top: 0px;">
                             <tr>
@@ -767,8 +822,8 @@
                         {% endfor %}
                     </select>
 
-                    <h4>or enter it manually: </h4>
-                    <form onsubmit="handleLocationSubmit(event)">
+                    <h4 style="text-align: center;">or enter it manually: </h4>
+                    <form onsubmit="handleLocationSubmit(event)" style="text-align: center;">
                         <label for="city">City:</label>
                         <input type="text" id="city" name="city" value="{{ location.city if location else '' }}" required><br>
             
@@ -797,7 +852,7 @@
                     <div style="text-align: center;">
                         <button class="button reference" onclick="socket.emit('get_csv_data')">Load Todays CSV Data</button>
                     </div>
-                    <canvas id="dataChart"></canvas>
+                    <canvas id="dataChart" style="display: none;"></canvas>
                 </div>
             </div>
 
@@ -805,7 +860,7 @@
                 <h3 class="title" onclick="toggleSection('logSection')">Server Logs</h3>
                 <div id="logSection" class="container">
                     <div class="content">
-                        <div id="logs" style="height: 300px; overflow-y: auto; background: #f9f9f9; padding: 0px; border: 1px solid #ccc; border-radius: 5px;">
+                        <div id="logs" style="height: 300px; overflow-y: auto; padding: 0px; border-radius: 5px;">
                         </div>
                     </div>
                 </div>
@@ -903,31 +958,6 @@
         });
 
     </script>
-
-    <style>
-        .collapsible h3 {
-            cursor: pointer;
-            padding: 10px;
-            margin: 0;
-            background-color: #f9f9f9; /* Light background for better visibility */
-            border: 1px solid #ccc; /* Border around the header */
-            border-radius: 5px; /* Rounded corners for a softer look */
-        }
-
-        .collapsible h3:hover {
-            background-color: #e9e9e9; /* Slightly darker on hover */
-        }
-
-        .content-section {
-            display: none; /* Initially collapsed */
-            padding: 10px;
-            border: 1px solid #ccc; /* Border for the content */
-            border-top: none; /* Avoid double border between header and content */
-            border-radius: 0 0 5px 5px; /* Rounded bottom corners */
-            background-color: #fff; /* White background for content */
-        }
-    </style>
-
 </body>
 
 </html>
