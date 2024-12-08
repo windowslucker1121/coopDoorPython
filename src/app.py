@@ -326,7 +326,7 @@ def door_task():
     door_override = None
     sunrise = None
     sunset = None
-    door.ErrorState("test")
+    sentErrorNotification = False
 
     while True:
         toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
@@ -339,6 +339,7 @@ def door_task():
         if clearErrorState:
             door.clear_errorState()
             global_vars.instance().set_value("clear_error_state", False)
+            sentErrorNotification = False
         
         if toogle_reference_of_endstops:
             print("Referencing door endstops, waiting for completion.")
@@ -414,6 +415,9 @@ def door_task():
                 if (door.ErrorState()):
                     door.stop()
                     door_move_count = 0
+                    if (sentErrorNotification == False):
+                        send_push_notification({"title": "Door Error", "message": "The door is in an error state, please check the door."})
+                        sentErrorNotification = True
                 else:
                     endstopTimeout = door.reference_door_endstops_ms
                     if endstopTimeout is None:
@@ -631,7 +635,6 @@ def handle_reference_endstops():
 
 @socketio.on('clear_error')
 def handle_clear_error():
-    send_push_notification({"title": "Hello", "body": "This is a test notification"})
     print('Clearing error state')
     global_vars.instance().set_value("clear_error_state", True)
 
