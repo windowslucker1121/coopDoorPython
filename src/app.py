@@ -498,13 +498,14 @@ def data_update_task():
             logger.error(f"Error in data update task: {e}")
         time.sleep(1.0)
 
-def data_log_task():
-    # Form log file name in form log/YY_MM_DD.csv
-    def get_log_file_name():
-        current_date = datetime.now()
-        formatted_date = current_date.strftime("%Y_%m_%d")
-        return os.path.join(os.path.join(root_path, "log"), formatted_date + ".csv")
+# Form log file name in form log/YY_MM_DD.csv
+def get_log_file_name():
+    current_date = datetime.now()
+    formatted_date = current_date.strftime("%Y_%m_%d")
+    return os.path.join(os.path.join(root_path, "log"), formatted_date + ".csv")
 
+def data_log_task():
+    
     # Make log directory:
     log_dir = os.path.dirname(get_log_file_name())
     os.makedirs(log_dir, exist_ok=True)
@@ -513,7 +514,7 @@ def data_log_task():
     todaysLog = get_log_file_name()
     if os.path.exists(todaysLog):
         os.remove(todaysLog)
-        
+
     last_log_file_name = ""
     while True:
         data = get_all_data()
@@ -651,6 +652,16 @@ def handle_clear_error():
 def handle_generate_error():
     logger.debug('Generating error state')
     global_vars.instance().set_value("debug_error", True)
+
+@socketio.on('get_csv_data')
+def handle_get_csv_data():
+    logger.debug('Getting CSV data')
+    csv_data = []
+    log_file_name = get_log_file_name()
+    if os.path.exists(log_file_name):
+        with open(log_file_name, 'r') as file:
+            csv_data = file.readlines()
+        socketio.emit('csv_data', csv_data, namespace='/')   
 
 ##################################
 # Static page handlers:

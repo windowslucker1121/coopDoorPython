@@ -313,6 +313,7 @@
             }
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
          var socket = io();
         let current_state = ""
@@ -447,6 +448,92 @@
             // Send the values to the Flask app via WebSocket
             socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
         }
+
+        socket.on('csv_data', function(data) {
+
+            console.log('Received CSV data:', data);
+            const ctx = document.getElementById('dataChart').getContext('2d');
+
+            // Dynamic CSV parser
+            function parseCSV(csvArray) {
+                const rows = csvArray.map(row => row.trim());
+                const headers = rows.shift().split(", ").map(header => header.trim().replace(/^#\s*/, ''));
+                const data = rows.map(row => {
+                    const values = row.split(", ").map(value => value.trim());
+                    return headers.reduce((obj, header, index) => {
+                        // Strip non-numeric characters for numeric values
+                        const numericValue = values[index].replace(/[^\d.-]/g, '');
+                        obj[header] = isNaN(numericValue) ? values[index] : parseFloat(numericValue);
+                        return obj;
+                    }, {});
+                });
+                return { headers, data };
+            }
+
+            const parsedData = parseCSV(data);
+
+            const labels = parsedData.data.map(row => row.time); // Assuming 'time' is the x-axis
+            const datasets = parsedData.headers
+            .filter(header => header !== 'time' && parsedData.data.some(row => !isNaN(row[header]))) // Exclude the time header and non-numeric values from datasets
+                .map(header => ({
+                    label: header.replace(/_/g, ' '), // Replace underscores with spaces for better readability
+                    data: parsedData.data.map(row => row[header]),
+                    borderColor: getRandomColor(), // Dynamic color assignment
+                    fill: false
+                }));
+
+            // Generate a random color for each dataset
+            function getRandomColor() {
+                return `hsl(${Math.random() * 360}, 70%, 50%)`;
+            }
+
+            // Reset the current chart if it exists
+            if (window.myChart) {
+                window.myChart.destroy();
+            }
+
+            // Create the chart
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Values'
+                            }
+                        }
+                    }
+                }
+            });
+        });
 
         document.addEventListener('DOMContentLoaded', function() {
             //event if socket fails somehow
@@ -703,6 +790,17 @@
                     </form>
                 </div>
             </div>
+
+            <div id="data_visualization_section" class="collapsible">
+                <h3 class="title" onclick="toggleSection('dataVisualizationSection')">Data Visualization</h3>
+                <div id="dataVisualizationSection" class="content-section">
+                    <div style="text-align: center;">
+                        <button class="button reference" onclick="socket.emit('get_csv_data')">Load Todays CSV Data</button>
+                    </div>
+                    <canvas id="dataChart"></canvas>
+                </div>
+            </div>
+
             <div class="collapsible">
                 <h3 class="title" onclick="toggleSection('logSection')">Server Logs</h3>
                 <div id="logSection" class="container">
@@ -712,6 +810,8 @@
                     </div>
                 </div>
             </div>
+
+
             <script>
                 function populateLocationFields() {
                     const dropdown = document.getElementById('predefined-locations');
