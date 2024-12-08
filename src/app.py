@@ -816,7 +816,6 @@ def send_individual_push_notification(subscription_info, payload, vapid_private_
             data=json.dumps(payload),
             vapid_private_key=vapid_private_key,
             vapid_claims=vapid_claims,
-            verbose=True,
             timeout=10
         )
     except WebPushException as ex:
