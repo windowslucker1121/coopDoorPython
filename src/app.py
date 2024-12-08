@@ -416,7 +416,7 @@ def door_task():
                     door.stop()
                     door_move_count = 0
                     if (sentErrorNotification == False):
-                        send_push_notification({"title": "Door Error", "body": "The door is in an error state, please check the door."})
+                        send_push_notification("Door Error", "The door is in an error state, please check the door.")
                         sentErrorNotification = True
                 else:
                     endstopTimeout = door.reference_door_endstops_ms
