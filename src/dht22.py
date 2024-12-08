@@ -2,7 +2,9 @@ import adafruit_dht
 import RPi.GPIO as GPIO
 import board
 import time
+import logging
 
+logger = logging.getLogger(__name__)
 class DHT22():
     # Provide data pin and power pin. We power via GPIO so that we can cycle power
     # between each read of the sensor. This works around the lock ups that frequently
@@ -44,5 +46,5 @@ if __name__ == '__main__':
     dht = DHT22(board.D21)
     while True:
         temp_f, hum = dht.get_temperature_and_humidity()
-        print("Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_f, hum))
+        logger.debug("Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_f, hum))
         time.sleep(2.0)

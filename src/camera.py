@@ -1,6 +1,8 @@
 import cv2
 import time
+import logging
 
+logger = logging.getLogger(__name__)
 class Camera:
     def __init__(self, device_index=0):
         self.device_index = device_index
@@ -27,11 +29,11 @@ class Camera:
 
 if __name__ == '__main__':
     try:
-        print("Initializing camera...")
+        logger.info("Initializing camera...")
         camera = Camera(device_index=0)
         
-        print("Starting camera test. Capturing frames...")
-        print("Press Ctrl+C to stop.")
+        logger.info("Starting camera test. Capturing frames...")
+        logger.info("Press Ctrl+C to stop.")
 
         frame_count = 0
         start_time = time.time()
@@ -44,18 +46,18 @@ if __name__ == '__main__':
             if frame_count % 150 == 0:
                 filename = f"frame_{frame_count}.jpg"
                 cv2.imwrite(filename, frame)
-                print(f"Saved: {filename}")
+                logger.info(f"Saved: {filename}")
 
             elapsed_time = time.time() - start_time
-            print(f"Captured frame {frame_count} | Elapsed time: {elapsed_time:.2f}s", end="\r")
+            logger.info(f"Captured frame {frame_count} | Elapsed time: {elapsed_time:.2f}s", end="\r")
 
             time.sleep(0.03)
 
     except KeyboardInterrupt:
-        print("\nCamera test interrupted by user.")
+        logger.critical("\nCamera test interrupted by user.")
     except RuntimeError as e:
-        print(f"Error: {e}")
+        logger.info(f"Error: {e}")
     finally:
-        print("\nReleasing camera resources...")
+        logger.info("\nReleasing camera resources...")
         del camera
-        print("Camera test ended.")
+        logger.info("Camera test ended.")

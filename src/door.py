@@ -1,5 +1,9 @@
 import os
+import logging
 from protected_dict import protected_dict as global_vars
+
+logger = logging.getLogger(__name__)
+
 
 if os.name == "nt":
     from mock_gpio import MockGPIO as GPIO
@@ -62,13 +66,13 @@ class DOOR():
 
     def clear_errorState(self):
         self.errorState = None
-        print("Error state cleared")
+        logger.info("Error state cleared")
 
     def ErrorState(self, state=None):
         if state is not None and state != self.errorState:
             self.stop (str(state))
             self.errorState = state
-            print("Error state set to: " + str(state) + " - Stopping all motor activity until error is cleared.")
+            logger.critical("Error state set to: " + str(state) + " - Stopping all motor activity until error is cleared.")
             return True
         elif self.errorState:
             return True
@@ -77,16 +81,16 @@ class DOOR():
     def reference_endstops(self) -> bool:
 
         if self.ErrorState():
-            print("Error state detected, cannot reference endstops")
+            logger.critical("Error state detected, cannot reference endstops")
             self.reference_door_active = False
             return False
         
         self.reference_door_active = True
-        print(f"Referencing - Timeout set to {referenceSequenceTimeout} seconds.")
-        print(f"Referencing - move door to CLOSE position.")
+        logger.info(f"Referencing - Timeout set to {referenceSequenceTimeout} seconds.")
+        logger.debug(f"Referencing - move door to CLOSE position.")
 
         if os.name == "nt":
-            print("Mocking endstops because we are on windows")
+            logger.info("Mocking endstops because we are on windows")
             self.reference_door_endstops_ms = 10000
             self.reference_door_active = False
             return True
@@ -94,37 +98,37 @@ class DOOR():
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         sequenceStartedTime = time.time()
-        print("Setting motor to close...")
+        logger.debug("Setting motor to close...")
         
         self.close()
         while GPIO.input(end_down) != compareValueLower:
-            # print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_down)))
+            # logger.debug("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_down)))
             if time.time() - sequenceStartedTime > referenceSequenceTimeout:
-                print("Reference sequence timed out - lower Endstop not hit")
+                logger.critical("Reference sequence timed out - lower Endstop not hit")
                 self.reference_door_active = False
                 self.ErrorState("Reference sequence timed out - lower Endstop not hit")
                 return False
             time.sleep(0.1)
     
-        print("Endstop hit, stopping motor")
+        logger.debug("Endstop hit, stopping motor")
         start_time = time.time()
         self.stop(state="closed")
 
-        print("Referencing - move door to OPEN position.")
+        logger.debug("Referencing - move door to OPEN position.")
         # Move to open end stop
-        print("Setting motor to open...")
+        logger.debug("Setting motor to open...")
         sequenceStartedTime = time.time()
         self.open()
         while GPIO.input(end_up) != compareValueUpper:
-            # print("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
+            # logger.debug("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
             if time.time() - sequenceStartedTime > referenceSequenceTimeout:
-                print("Reference sequence timed out - upper Endstop not hit")
+                logger.critical("Reference sequence timed out - upper Endstop not hit")
                 self.reference_door_active = False
                 self.ErrorState("Reference sequence timed out - upper Endstop not hit")
                 return False
             time.sleep(0.1)
 
-        print("Endstop hit, stopping motor")
+        logger.debug("Endstop hit, stopping motor")
         #get the time it took to move from closed to open in ms
         end_time = time.time()
         time_taken = end_time - start_time
@@ -135,7 +139,7 @@ class DOOR():
         # Set the reference_endstops_set variable
         self.reference_door_endstops_ms = time_taken_ms
         self.reference_door_active = False
-        print("Referenced endstops in " + str(time_taken_ms) + "ms")
+        logger.info("Referenced endstops in " + str(time_taken_ms) + "ms")
         return True
 
     #endstop is hit, stop the motor
@@ -168,11 +172,11 @@ class DOOR():
         c_read = GPIO.input(c_pin)
         if o_read != c_read:
             if o_read == GPIO.HIGH:
-                #print("Opening!")
+                #logger.debug("Opening!")
                 self.override = True
                 self.open()
             elif c_read == GPIO.HIGH:
-                #print("Closing!")
+                #logger.debug("Closing!")
                 self.override = True
                 self.close()
 
@@ -186,7 +190,7 @@ class DOOR():
         o_read = GPIO.input(o_pin)
         c_read = GPIO.input(c_pin)
         if o_read == c_read:
-            #print("Do nothing.")
+            #logger.debug("Do nothing.")
             self.override = False
             self.stop(state=nuetral_state)
 
@@ -201,7 +205,7 @@ class DOOR():
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.LOW)
         if self.lastState != state:
-            print("GPIO - Door stopped and is in state: " + state)
+            logger.info("GPIO - Door stopped and is in state: " + state)
             self.lastState = state
 
         self.state = state
@@ -224,7 +228,7 @@ class DOOR():
         self.state = "opening"
 
         if self.lastState != self.state:
-            print("GPIO - Door opening")
+            logger.info("GPIO - Door opening")
             self.lastState = self.state
         
 
@@ -246,7 +250,7 @@ class DOOR():
 
         if self.lastState != self.state:
             self.lastState = self.state
-            print("GPIO - Door closing")
+            logger.info("GPIO - Door closing")
 
     def open_then_stop(self):
         self.open()

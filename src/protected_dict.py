@@ -1,6 +1,8 @@
 import threading
 import copy
+import logging
 
+logger = logging.getLogger(__name__)
 class protected_dict:
     _instance_lock = threading.Lock()
     _dictionary = {}
@@ -37,9 +39,9 @@ if __name__ == '__main__':
     singleton_dict.set_values({"key1": "value1", "key2": "value2", "key3": "value3"})
     values = singleton_dict.get_values(["key1", "key2", "key3"])
     value1, value2, value3 = singleton_dict.get_values(["key1", "key2", "key3"])
-    print(value0)
-    print(values)
-    print(value1)
-    print(value2)
-    print(value3)
-    print(protected_dict.instance().get_values(["key0", "key3"]))
+    logger.debug(value0)
+    logger.debug(values)
+    logger.debug(value1)
+    logger.debug(value2)
+    logger.debug(value3)
+    logger.debug(protected_dict.instance().get_values(["key0", "key3"]))

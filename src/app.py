@@ -25,12 +25,14 @@ import base64
 from pywebpush import webpush, WebPushException
 import atexit
 
+logger = logging.getLogger(__name__)
+
 if os.name != 'nt':
     from gpiozero import CPUTemperature
     import board
     from dht22 import DHT22
 else:
-    print("Running on Windows, using mock classes.")
+    logger.warning("Running on Windows, using mock classes.")
     from MockDHT22 import MockDHT22
     from mock_board import MockBoard
     from mock_temperatur import MockCPUTemperature
@@ -97,6 +99,7 @@ def save_config():
                 "sunrise_offset": global_vars.instance().get_value("sunrise_offset"),
                 "sunset_offset": global_vars.instance().get_value("sunset_offset"),
                 "location": global_vars.instance().get_value("location"),
+                "consoleLogToFile": global_vars.instance().get_value("consoleLogToFile"),
                 "csvLog": global_vars.instance().get_value("csvLog"),
                 "enable_camera" : global_vars.instance().get_value("enable_camera"),
                 "camera_index" : global_vars.instance().get_value("camera_index")
@@ -117,6 +120,7 @@ def load_config():
                 "latitude": 40.01499,
                 "longitude": -105.27055
             },
+            "consoleLogToFile": False,
             #will be used for currently not implemented stopping/starting of the logging thread
             "csvLog": True,
             "enable_camera" : False,
@@ -135,14 +139,14 @@ def load_config():
         global_vars.instance().set_values(config_to_set)
 
     if saveNewConfig:
-        print("No configuration file found, creating a new one.")
+        logger.info("No configuration file found, creating a new one.")
         save_config()
 
 
 def get_valid_locations() -> list:
     locations = []
     location_database = database()
-    #print(type(location_database))
+    #logger.debug(type(location_database))
 
     for location_name, location_info in location_database.items():
         if isinstance(location_info, dict):
@@ -287,9 +291,9 @@ def temperature_task():
         temp_in, hum_in = dht_in.get_temperature_and_humidity()
 
         #if temp_out is not None and hum_out is not None:
-        #    print("Outside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_out, hum_out))
+        #    logger.debug("Outside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_out, hum_out))
         #if temp_in is not None and hum_in is not None:
-        #    print("Inside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_in, hum_in))
+        #    logger.debug("Inside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_in, hum_in))
 
         # If it is midnight then reset the mins and maxes so we get fresh values for the new day:
         current_date = date.today()
@@ -342,15 +346,15 @@ def door_task():
             sentErrorNotification = False
         
         if toogle_reference_of_endstops:
-            print("Referencing door endstops, waiting for completion.")
+            logger.info("Referencing door endstops, waiting for completion.")
             global_vars.instance().set_value("toggle_reference_of_endstops", False)
 
             if (door.reference_endstops() == False):
-                print("Referencing door endstops failed, please check the door and try again.")
+                logger.critical("Referencing door endstops failed, please check the door and try again.")
                 continue
             
             global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
-            print("Referencing door endstops complete with total time: " + str(door.reference_door_endstops_ms) + "ms")
+            logger.info("Referencing door endstops complete with total time: " + str(door.reference_door_endstops_ms) + "ms")
         else:
             # Get state and desired state:
             door_state = door.get_state()
@@ -359,12 +363,12 @@ def door_task():
                 global_vars.instance().get_values(["desired_door_state", "auto_mode","reference_door_endstops_ms"])
 
             auto_mode = auto_mode == "True"
-            #print("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
+            #logger.debug("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
             # If we are in auto mode then open or close the door based on sunrise
             # or sunset times.
             if auto_mode and not door_override:
                 if reference_door_endstops_ms is None:
-                    print("Reference door endstops not set. Please run the reference door endstops sequence from the WebUI - disabling auto mode.")
+                    logger.warning("Reference door endstops not set. Please run the reference door endstops sequence from the WebUI - disabling auto mode.")
                     global_vars.instance().set_value("auto_mode", "False")
                 else:
                     # Get the current sunrise and sunset time, time of close, time of open, and current time.
@@ -420,12 +424,12 @@ def door_task():
                         sentErrorNotification = True
                 else:
                     endstopTimeout = door.reference_door_endstops_ms
+                    if (door.reference_door_endstops_ms is not None and (isinstance(endstopTimeout, int) or isinstance(endstopTimeout, float))):
+                        logger.debug(f"Endstop timeout set to: {endstopTimeout} seconds")
+                        endstopTimeout = door.reference_door_endstops_ms * 0.001
                     if endstopTimeout is None:
                         endstopTimeout = 10
-                        print(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
-                    if (door.reference_door_endstops_ms is not None):
-                        print(f"Endstop timeout set to: {endstopTimeout} seconds")
-                        endstopTimeout = door.reference_door_endstops_ms * 0.001
+                        logger.debug(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
@@ -436,7 +440,7 @@ def door_task():
                                 door_move_count = 0
                         case "open":
                             if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
-                                print(f"OPEN: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                logger.debug(f"OPEN: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
                                 door.open()
                                 door_move_count += 1
                             else:
@@ -445,7 +449,7 @@ def door_task():
                                 door_move_count = 0
                         case "closed":
                             if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
-                                print(f"CLOSE: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                logger.debug(f"CLOSE: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
                                 door.close()
                                 door_move_count += 1
                             else:
@@ -484,14 +488,14 @@ def door_task():
 def data_update_task():
     lastRefreshTime = datetime.now()
     while True:
-        #print("Time since last refresh: " + str((datetime.now() - lastRefreshTime).total_seconds() * 1000) + "ms")
+        #logger.debug("Time since last refresh: " + str((datetime.now() - lastRefreshTime).total_seconds() * 1000) + "ms")
         lastRefreshTime = datetime.now()
         try:
             to_send = get_all_data()
-            # print(f"Sending data: {to_send}")
+            # logger.debug(f"Sending data: {to_send}")
             socketio.emit('data', to_send, namespace='/')
         except Exception as e:
-            print(f"Error in data update task: {e}")
+            logger.error(f"Error in data update task: {e}")
         time.sleep(1.0)
 
 def data_log_task():
@@ -505,6 +509,11 @@ def data_log_task():
     log_dir = os.path.dirname(get_log_file_name())
     os.makedirs(log_dir, exist_ok=True)
 
+    #check if the todaysLogFile is there already and if so remove it
+    todaysLog = get_log_file_name()
+    if os.path.exists(todaysLog):
+        os.remove(todaysLog)
+        
     last_log_file_name = ""
     while True:
         data = get_all_data()
@@ -527,11 +536,11 @@ def data_log_task():
 
 def camera_task():
     if (global_vars.instance().get_value("enable_camera") == False):
-        print("Camera is disabled by configuration")
+        logger.info("Camera is disabled by configuration")
         return
     
     cameraIndex = global_vars.instance().get_value("camera_index")
-    print(f"Starting camera task with camera index: {cameraIndex}")
+    logger.debug(f"Starting camera task with camera index: {cameraIndex}")
     camera = Camera(device_index=cameraIndex)
 
     while True:
@@ -540,8 +549,8 @@ def camera_task():
             encoded_frame = base64.b64encode(frame).decode('utf-8')
             socketio.emit('camera', encoded_frame, namespace='/')
         except RuntimeError as e:
-            print(f"Error: {e}")
-            print("Camera task will end now.")
+            logger.critical(f"Error: {e}")
+            logger.critical("Camera task will end now.")
             break
         time.sleep(0.1)
 
@@ -558,40 +567,40 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     pass
-    #print('Client disconnected')
+    #logger.debug('Client disconnected')
 
 @socketio.on('open')
 def handle_open():
-    print('Open button pressed which disables auto mode')
+    logger.debug('Open button pressed which disables auto mode')
     global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "open")
 
 @socketio.on('close')
 def handle_close():
-    print('Close button pressed which disables auto mode')
+    logger.debug('Close button pressed which disables auto mode')
     
     global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "closed")
 
 @socketio.on('stop')
 def handle_stop():
-    print('Stop button pressed which disables auto mode')
+    logger.debug('Stop button pressed which disables auto mode')
     global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "stopped")
 
 @socketio.on('toggle')
 def handle_toggle(message):
-    print('Toggle button pressed')
+    logger.debug('Toggle button pressed')
     toggle_value = message['toggle']
-    print(f'Toggle button pressed: {toggle_value}')
+    logger.debug(f'Toggle button pressed: {toggle_value}')
     if toggle_value:
-        print('Auto Mode Enabled')
+        logger.info('Auto Mode Enabled')
         global_vars.instance().set_value("auto_mode", "True")
     else:
-        print('Auto Mode Disabled')
+        logger.info('Auto Mode Disabled')
         global_vars.instance().set_value("auto_mode", "False")
 
-    print(f"current auto mode: {global_vars.instance().get_value('auto_mode')}")
+    logger.debug(f"current auto mode: {global_vars.instance().get_value('auto_mode')}")
     save_config()
 
 @socketio.on('auto_offsets')
@@ -626,21 +635,21 @@ def handle_update_location(location_data):
     # Reload the sunrise and sunset calculation based on new location
     reload_location_data()
 
-    print(f"Location updated to: {new_location}")
+    logger.info(f"Location updated to: {new_location}")
 
 @socketio.on('reference_endstops')
 def handle_reference_endstops():
-    print('Referencing endstops Socket Command')
+    logger.debug('Referencing endstops Socket Command')
     global_vars.instance().set_value("toggle_reference_of_endstops", True)
 
 @socketio.on('clear_error')
 def handle_clear_error():
-    print('Clearing error state')
+    logger.info('Clearing error state')
     global_vars.instance().set_value("clear_error_state", True)
 
 @socketio.on('generate_error')
 def handle_generate_error():
-    print('Generating error state')
+    logger.debug('Generating error state')
     global_vars.instance().set_value("debug_error", True)
 
 ##################################
@@ -681,7 +690,7 @@ def serve_sw():
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
     subscription = request.json
-    print('Received subscription:', subscription)
+    logger.debug('Received subscription:', subscription)
     currentJsonContent = None
     if os.path.exists(".subscriptions.json"):
         currentJsonContent = json.loads(open(".subscriptions.json").read())
@@ -712,31 +721,42 @@ class SocketIOHandler(logging.Handler):
 def exitHandler(stdout,stderr):
     sys.stdout = stdout
     sys.stderr = stderr
-    print("Exiting Coop Controller")
+    logger.info("Exiting Coop Controller")
 
 def configure_logging():
     """Configure the logging system."""
-    
+    logging.basicConfig(level=logging.DEBUG) 
+    # Define the log format
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Get the root logger
     rootLogger = logging.getLogger()
-    rootLogger.setLevel(logging.INFO)
+    rootLogger.setLevel(logging.DEBUG)
 
     # Add SocketIO logging handler
-    socketio_handler = SocketIOHandler()
+    socketio_handler = SocketIOHandler()  # Assume this handler is already defined
     socketio_handler.setFormatter(formatter)
-    rootLogger.addHandler(socketio_handler)
+    if not any(isinstance(h, SocketIOHandler) for h in rootLogger.handlers):
+        rootLogger.addHandler(socketio_handler)
 
     # Add StreamHandler to print logs to the console
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    rootLogger.addHandler(console_handler)
+    console_handler.setFormatter(formatter)  # Explicitly set the same formatter
+    if not any(isinstance(h, logging.StreamHandler) for h in rootLogger.handlers):
+        rootLogger.addHandler(console_handler)
 
-    stderrHandler = logging.StreamHandler(sys.stderr)
-    stderrHandler.setFormatter(formatter)
-    rootLogger.addHandler(stderrHandler)
+    if global_vars.instance().get_value("consoleLogToFile"):
+        file_handler = logging.FileHandler("log.txt", mode='w')
+        file_handler.setFormatter(formatter)
+        if not any(isinstance(h, logging.FileHandler) for h in rootLogger.handlers):
+            rootLogger.addHandler(file_handler)
+
+    # Set the log level for the geventwebsocket handler because it is too verbose
+    logger = logging.getLogger("geventwebsocket.handler")
+    logger.setLevel(logging.WARNING)
 
     return rootLogger
+
 
 vapid_private_key = None
 def send_push_notification(title : str, body : str):
@@ -744,17 +764,17 @@ def send_push_notification(title : str, body : str):
     toRemove = []
     payload = {"title": title, "body": body}
     try:
-        print("Sending push notification with payload: " + str(payload))
+        logger.debug("Sending push notification with payload: " + str(payload))
         global vapid_private_key
         if vapid_private_key is None:
             vapid_private_key = global_vars.instance().get_value("vapid_private_key")
             if vapid_private_key is None:
-                print("Vapid private key not set, can't send push notification")
+                logger.critical("Vapid private key not set, can't send push notification")
                 return
 
         # Load subscription info from file
         if not os.path.exists(".subscriptions.json"):
-            print("No subscriptions file found, can't send push notification")
+            logger.critical("No subscriptions file found, can't send push notification")
             return
 
         jsonContent = json.loads(open(".subscriptions.json").read())
@@ -765,7 +785,7 @@ def send_push_notification(title : str, body : str):
             if not valid:
                 toRemove.append(subscription)
     except Exception as e:
-        print(f"Error in send_push_notification: {e}")
+        logger.error(f"Error in send_push_notification: {e}")
     
     for remove in toRemove:
         jsonContent["subscriptions"].remove(remove)
@@ -774,7 +794,7 @@ def send_push_notification(title : str, body : str):
         with open('.subscriptions.json', 'w') as f:
             json.dump(jsonContent, f)
     except Exception as e:
-        print(f"Error in removing invalid subscriptions from file: {e}")
+        logger.debug(f"Error in removing invalid subscriptions from file: {e}")
     
 
 
@@ -790,18 +810,18 @@ def send_individual_push_notification(subscription_info, payload, vapid_private_
         )
     except WebPushException as ex:
         #TODO remove subscription if it is not valid anymore
-        print(f"WebPushException occurred: {ex}")
+        logger.debug(f"WebPushException occurred: {ex}")
         responseCode = getattr(ex, 'response', None)
         
         if responseCode is not None:
             if responseCode.status_code == 410:
-                print("Subscription is no longer valid, removing it.")
+                logger.debug("Subscription is no longer valid, removing it.")
                 return False
         else:
-            print(f"Response: {responseCode}")
-            print(f"Status: {getattr(ex, 'status_code', None)}")
+            logger.debug(f"Response: {responseCode}")
+            logger.debug(f"Status: {getattr(ex, 'status_code', None)}")
     except Exception as ex:
-        print(f"General Exception occurred while sending push notification: {ex}")#
+        logger.error(f"General Exception occurred while sending push notification: {ex}")#
     return True
 
 
@@ -814,22 +834,24 @@ def load_notification_keys():
             yaml_config = yaml.load(content)
             global_vars.instance().set_values(yaml_config["secrets"])
     else:
-        print("No secrets file found - the system will missbehave without it.")
+        logger.critical("No secrets file found - the system will missbehave without it.")
 
 if __name__ == '__main__':
-    # configure_logging()
-    # logging.basicConfig(level=logging.DEBUG)
-    print("Starting Coop Controller")
+    
+    # Initialize the desired door state:
+    global_vars.instance().set_value("desired_door_state", "stopped")
+    
+    # Load global configuration file into memory
+    load_config()
+
+    configure_logging()
+    logger.info("Starting Coop Controller")
 
     get_valid_locations()
 
     load_notification_keys()
 
-    # Initialize the desired door state:
-    global_vars.instance().set_value("desired_door_state", "stopped")
 
-    # Load global configuration file into memory
-    load_config()
 
     # Reload location data for sunrise/sunset calculations
     reload_location_data()
@@ -865,7 +887,7 @@ if __name__ == '__main__':
     port = 5000
 
     # Print the IP address and port to the console
-    print(f"Starting Flask app on {host}:{port}")
+    logger.info(f"Starting Flask app on {host}:{port}")
 
     # Start the Flask app
     socketio.run(app, debug=False, host=host, port=port)

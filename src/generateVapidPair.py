@@ -5,7 +5,9 @@ from ruamel.yaml import YAML
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from py_vapid import Vapid
 import os
+import logging
 
+logger = logging.getLogger(__name__)
 
 def generate_vapid_keys():
     # Generate a new pair of VAPID keys
@@ -45,7 +47,7 @@ def dump_keys_to_yaml(public_key, private_key, filename=".secrets.yaml"):
     with open(filename, "w") as file:
         yaml.dump(secrets, file)
 
-    print(f"Keys have been successfully written to {filename}")
+    logger.info(f"Keys have been successfully written to {filename}")
 
 
 # Generate the keys and prompt for saving
@@ -60,13 +62,13 @@ if save_keys == "y":
         try:
             os.remove(subscriptions_file)
             # Delete them because the keys have changed
-            print(f"Deleted old subscriptions file: {subscriptions_file}")
+            logger.info(f"Deleted old subscriptions file: {subscriptions_file}")
         except Exception as e:
-            print(f"Error deleting subscriptions file: {e}")
+            logger.critical(f"Error deleting subscriptions file: {e}")
     else:
-        print(f"No existing subscriptions file found to delete.")
+        logger.info(f"No existing subscriptions file found to delete.")
 
     # Save the new keys to .secrets.yaml
     dump_keys_to_yaml(public_key, private_key)
 else:
-    print("Keys were not saved, and subscriptions were not deleted.")
+    logger.critical("Keys were not saved, and subscriptions were not deleted.")
