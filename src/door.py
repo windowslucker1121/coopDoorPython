@@ -160,6 +160,9 @@ class DOOR():
         elif endstopLower == compareValueLower:
             self.stop(state="closed")
         
+        logger.debug("Endstop Upper: %s", endstopUpper)
+        logger.debug("Endstop Lower: %s", endstopLower)
+        
     # Open or close door if switch activated:
     def switch_activated(self, channel):
         if self.ErrorState():
@@ -175,10 +178,12 @@ class DOOR():
         if o_read != c_read:
             if o_read == GPIO.HIGH:
                 #logger.debug("Opening!")
+                logger.debug("Manuel Switch to UP activated.")
                 self.override = True
                 self.open()
             elif c_read == GPIO.HIGH:
                 #logger.debug("Closing!")
+                logger.debug("Manuel Switch to DOWN activated.")
                 self.override = True
                 self.close()
 
