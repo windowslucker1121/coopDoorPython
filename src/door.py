@@ -98,6 +98,8 @@ class DOOR():
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         sequenceStartedTime = time.time()
+        sequenceTimeoutTime = sequenceStartedTime + referenceSequenceTimeout
+        logger.debug("Current time %s - Timeout time %s", sequenceStartedTime, sequenceTimeoutTime)
         logger.debug("Setting motor to close...")
         
         self.close()
