@@ -430,6 +430,7 @@ def door_task():
                     if endstopTimeout is None:
                         endstopTimeout = 10
                         logger.debug(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
+                    logger.debug("Door state does not match desired door state, moving door. (CurrentState %s | DesiredState %s)",door_state, d_door_state)
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
