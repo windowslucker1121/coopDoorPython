@@ -120,6 +120,8 @@ class DOOR():
         # Move to open end stop
         logger.debug("Setting motor to open...")
         sequenceStartedTime = time.time()
+        sequenceTimeoutTime = sequenceStartedTime + referenceSequenceTimeout
+        logger.debug("Current time %s - Timeout time %s", sequenceStartedTime, sequenceTimeoutTime)
         self.open()
         while GPIO.input(end_up) != compareValueUpper:
             # logger.debug("Waiting for endstop to be hit - current Endstop Value:" + str(GPIO.input(end_up)))
