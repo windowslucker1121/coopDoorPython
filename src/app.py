@@ -331,6 +331,7 @@ def door_task():
     sunrise = None
     sunset = None
     sentErrorNotification = False
+    thread_sleep_time = 0.5
 
     while True:
         toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
@@ -354,7 +355,7 @@ def door_task():
                 continue
             
             global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
-            logger.info("Referencing door endstops complete with total time: " + str(door.reference_door_endstops_ms) + "ms")
+            logger.info("Reference Sequence Successfull with total time: %s milliseconds", door.reference_door_endstops_ms)
         else:
             # Get state and desired state:
             door_state = door.get_state()
@@ -363,6 +364,7 @@ def door_task():
                 global_vars.instance().get_values(["desired_door_state", "auto_mode","reference_door_endstops_ms"])
 
             auto_mode = auto_mode == "True"
+            door.set_auto_mode(auto_mode)
             #logger.debug("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
             # If we are in auto mode then open or close the door based on sunrise
             # or sunset times.
@@ -425,25 +427,26 @@ def door_task():
                 else:
                     endstopTimeout = door.reference_door_endstops_ms
                     if (door.reference_door_endstops_ms is not None and (isinstance(endstopTimeout, int) or isinstance(endstopTimeout, float))):
-                        logger.debug(f"Endstop timeout set to: {endstopTimeout} seconds")
                         endstopTimeout = door.reference_door_endstops_ms * 0.001
                     if endstopTimeout is None:
                         endstopTimeout = 10
                         logger.debug(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
-                    logger.debug("Door state does not match desired door state, moving door. (CurrentState %s | DesiredState %s)",door_state, d_door_state)
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
+                                logger.debug("stop because door is in open or closed state (%s)", door_state)
                                 door.stop(door_state)
                                 door_move_count = 0
                             else:
+                                logger.debug("stop because door is in moving state")
                                 door.stop()
+                                logger.debug("SHOULD NOW BE STOPPED - door state: %s", door.get_state())
                                 door_move_count = 0
                         case "open":
                             if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
                                 logger.debug(f"OPEN: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
                                 door.open()
-                                door_move_count += 1
+                                door_move_count += thread_sleep_time
                             else:
                                 door.ErrorState("Endstop not reached")
                                 global_vars.instance().set_value("desired_door_state", "stopped")
@@ -452,7 +455,7 @@ def door_task():
                             if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
                                 logger.debug(f"CLOSE: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
                                 door.close()
-                                door_move_count += 1
+                                door_move_count += thread_sleep_time
                             else:
                                 door.ErrorState("Endstop not reached")
                                 global_vars.instance().set_value("desired_door_state", "stopped")
@@ -484,7 +487,7 @@ def door_task():
                 "error_state": door.errorState if door.ErrorState() else "" \
             })
 
-            time.sleep(1.0)
+            time.sleep(thread_sleep_time)
 
 def data_update_task():
     lastRefreshTime = datetime.now()

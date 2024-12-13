@@ -19,3 +19,5 @@ venv/
 config.yaml
 .secrets.yaml
 .subscriptions.json
+src/log.txt
+log.txt

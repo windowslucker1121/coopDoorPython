@@ -1,6 +1,6 @@
 {
     "name": "Coop Door",
-    "short_name": "CD",
+    "short_name": "Coop Door",
     "start_url": "/",
     "scope": "/",
     "display": "standalone",
