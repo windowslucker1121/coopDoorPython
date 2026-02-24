@@ -83,3 +83,4 @@ You may want to deinstall `RPi.GPIO` and install `rpi-lgpio` instead with
 pip uninstall RPi.GPIO
 pip install rpi-lgpio
 ````
+
