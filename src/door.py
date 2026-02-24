@@ -92,12 +92,6 @@ class DOOR():
         self.reference_door_active = True
         logger.info(f"Referencing - Timeout set to {referenceSequenceTimeout} seconds.")
         logger.debug(f"Referencing - move door to CLOSE position.")
-
-        if os.name == "nt":
-            logger.info("Mocking endstops because we are on windows")
-            self.reference_door_endstops_ms = 10000
-            self.reference_door_active = False
-            return True
         
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
@@ -231,7 +225,17 @@ class DOOR():
         if o_read == c_read:
             #logger.debug("Do nothing.")
             self.override = False
-            self.stop(state=nuetral_state)
+            
+            # Check if we are at an endstop before defaulting to stopped
+            compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
+            compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+            
+            if GPIO.input(end_up) == compareValueUpper:
+                self.stop(state="open")
+            elif GPIO.input(end_down) == compareValueLower:
+                self.stop(state="closed")
+            else:
+                self.stop(state=nuetral_state)
 
     def get_state(self):
         return self.state
@@ -247,18 +251,8 @@ class DOOR():
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.LOW)
         if self.lastState != state:
-            timeStopped = time.time() - self.startedMovingTime
+            timeStopped = time.time() - self.startedMovingTime if self.startedMovingTime else 0
             logger.debug("Door stopped and is in state: " + state + " - Time stopped: " + str(timeStopped) + " AutoMode: " + str(self.auto_mode) + " Override: " + str(self.override))
-            if self.reference_door_endstops_ms is not None and self.auto_mode is True and self.override is not True:
-                lower_bound = self.reference_door_endstops_ms / 1000 - self.timeOutWindowClosingDoor / 2
-                upper_bound = self.reference_door_endstops_ms / 1000 + self.timeOutWindowClosingDoor / 2
-                logger.debug(f"Door stopped and is in state: {state} - Time moved: {timeStopped:.2f} s - Time window: {lower_bound:.2f} s - {upper_bound:.2f} s")
-                if timeStopped < lower_bound or timeStopped > upper_bound:
-                    logger.error(
-                        f"Time stopped ({timeStopped:.2f} s) is outside the range (reference_door_endstops_ms: {self.reference_door_endstops_ms:.2f} s) - Door might be stuck"
-                        f"({lower_bound:.2f} s - {upper_bound:.2f} s) - Door might be stuck"
-                    )
-                    self.ErrorState("Door might be stuck", stopDoor=False)
             logger.info("GPIO - Door stopped and is in state: " + state)
             self.lastState = state
         self.state = state

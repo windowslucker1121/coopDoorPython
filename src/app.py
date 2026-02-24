@@ -434,9 +434,10 @@ def door_task():
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
-                                logger.debug("stop because door is in open or closed state (%s)", door_state)
+                                if door_move_count != -1: 
+                                    logger.debug("stop because door is in open or closed state (%s)", door_state)
+                                    door_move_count = -1
                                 door.stop(door_state)
-                                door_move_count = 0
                             else:
                                 logger.debug("stop because door is in moving state")
                                 door.stop()
@@ -671,12 +672,38 @@ def handle_get_csv_data():
 # Static page handlers:
 ##################################
 
+@app.route('/mock')
+def mock_panel():
+    if os.name != 'nt':
+        return "Mock panel is only available on Windows.", 403
+    return render_template('mock.html')
+
+@socketio.on('mock_trigger_pin')
+def handle_mock_trigger_pin(data):
+    if os.name == 'nt':
+        from mock_gpio import GPIO
+        pin = data['pin']
+        state = GPIO.HIGH if data['state'] == 'HIGH' else GPIO.LOW
+        GPIO.trigger_event(pin, state)
+
+@socketio.on('mock_get_outputs')
+def handle_mock_get_outputs():
+    if os.name == 'nt':
+        from mock_gpio import GPIO
+        pins = GPIO.get_all_pins()
+        outputs = {
+            17: pins.get(17, {}).get('state', 'LOW'),
+            27: pins.get(27, {}).get('state', 'LOW'),
+            22: pins.get(22, {}).get('state', 'LOW')
+        }
+        socketio.emit('mock_update_outputs', outputs, namespace='/')
+
 # Route for the home page
 @app.route('/')
 def index():
     # Render the template with temperature and humidity values
     return render_template(
-        'index.html',
+        'index_optimized_door.html',
         auto_mode=global_vars.instance().get_value("auto_mode"),
         sunrise_offset=global_vars.instance().get_value("sunrise_offset"),
         sunset_offset=global_vars.instance().get_value("sunset_offset"),
@@ -720,6 +747,37 @@ def subscribe():
         json.dump(currentJsonContent, f)
 
     return jsonify({'message': 'Subscription successful!'})
+
+@app.route('/update', methods=['POST'])
+def update_app():
+    import subprocess
+    import sys
+    import os
+    import time
+    from threading import Thread
+    
+    logger.info("Update requested. Starting update script...")
+    
+    # Path to the update script
+    update_script_path = os.path.join(os.path.dirname(__file__), 'update_script.py')
+    app_path = os.path.abspath(__file__)
+    
+    # Start the update script as a detached process
+    if os.name == 'nt':
+        # Windows
+        subprocess.Popen([sys.executable, update_script_path, app_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        # Linux
+        subprocess.Popen([sys.executable, update_script_path, app_path], preexec_fn=os.setpgrp)
+    
+    # Stop the current Flask app
+    def shutdown():
+        time.sleep(1)
+        logger.info("Shutting down for update...")
+        os._exit(0)
+    
+    Thread(target=shutdown).start()
+    return jsonify({"status": "updating"})
     
 app.jinja_env.filters['is_number'] = is_number
 ##################################

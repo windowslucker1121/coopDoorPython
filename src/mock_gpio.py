@@ -3,6 +3,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 globalPins = {}
+callbacks = {}
+
 class MockGPIO:
     BCM = "BCM"
     IN = "IN"
@@ -13,19 +15,20 @@ class MockGPIO:
     BOTH = "BOTH"
     RISING = "RISING"
 
-    def __init__(self):
-        globalPins = {} 
-
+    @staticmethod
     def setwarnings(state):
         pass
 
+    @staticmethod
     def setmode(mode):
         logger.debug(f"GPIO mode set to {mode}")
 
+    @staticmethod
     def setup(pin, mode, pull_up_down=None):
         globalPins[pin] = {"mode": mode, "state": MockGPIO.LOW}
         logger.debug(f"Pin {pin} set up as {mode} with pull {pull_up_down}")
 
+    @staticmethod
     def output(pin, state):
         if pin in globalPins:
             globalPins[pin]["state"] = state
@@ -33,11 +36,29 @@ class MockGPIO:
         else:
             raise ValueError(f"Pin {pin} is not set up.")
 
+    @staticmethod
     def input(pin):
         return globalPins.get(pin, {}).get("state", MockGPIO.LOW)
 
-    def add_event_detect(self, pin, edge=None, callback=None, bouncetime=0):
+    @staticmethod
+    def add_event_detect(pin, edge=None, callback=None, bouncetime=0):
         edge = edge or MockGPIO.BOTH
+        if callback:
+            if pin not in callbacks:
+                callbacks[pin] = []
+            callbacks[pin].append(callback)
         logger.debug(f"Event detection added on pin {pin} for edge {edge} with bouncetime {bouncetime}")
+
+    @staticmethod
+    def trigger_event(pin, state):
+        if pin in globalPins:
+            globalPins[pin]["state"] = state
+        if pin in callbacks:
+            for cb in callbacks[pin]:
+                cb(pin)
+
+    @staticmethod
+    def get_all_pins():
+        return globalPins
 
 GPIO = MockGPIO()
