@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mock Control Panel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .panel { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .btn { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        .btn-active { background-color: #4CAF50; color: white; }
+        .btn-inactive { background-color: #f44336; color: white; }
+        .status { font-weight: bold; margin-left: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Mock Control Panel</h1>
+    
+    <div class="panel">
+        <h3>Manual Switches</h3>
+        <button id="btn-open-switch" class="btn btn-inactive" onmousedown="triggerPin(5, 'HIGH')" onmouseup="triggerPin(5, 'LOW')" onmouseleave="triggerPin(5, 'LOW')">Hold to Open (Pin 5)</button>
+        <button id="btn-close-switch" class="btn btn-inactive" onmousedown="triggerPin(6, 'HIGH')" onmouseup="triggerPin(6, 'LOW')" onmouseleave="triggerPin(6, 'LOW')">Hold to Close (Pin 6)</button>
+    </div>
+
+    <div class="panel">
+        <h3>Endstops</h3>
+        <button id="btn-end-up" class="btn btn-inactive" onclick="togglePin(23)">Toggle Endstop UP (Pin 23)</button>
+        <span id="status-end-up" class="status">LOW</span>
+        <br><br>
+        <button id="btn-end-down" class="btn btn-inactive" onclick="togglePin(24)">Toggle Endstop DOWN (Pin 24)</button>
+        <span id="status-end-down" class="status">LOW</span>
+    </div>
+
+    <div class="panel">
+        <h3>Motor Outputs (Read-Only)</h3>
+        <p>IN1 (Up): <span id="out-in1" class="status">LOW</span></p>
+        <p>IN2 (Down): <span id="out-in2" class="status">LOW</span></p>
+        <p>ENA (Power): <span id="out-ena" class="status">LOW</span></p>
+    </div>
+
+    <script>
+        const socket = io();
+        const pinStates = {
+            23: 'LOW',
+            24: 'LOW'
+        };
+
+        function triggerPin(pin, state) {
+            socket.emit('mock_trigger_pin', { pin: pin, state: state });
+        }
+
+        function togglePin(pin) {
+            pinStates[pin] = pinStates[pin] === 'LOW' ? 'HIGH' : 'LOW';
+            const state = pinStates[pin];
+            socket.emit('mock_trigger_pin', { pin: pin, state: state });
+            
+            const btn = document.getElementById(`btn-end-${pin === 23 ? 'up' : 'down'}`);
+            const status = document.getElementById(`status-end-${pin === 23 ? 'up' : 'down'}`);
+            
+            if (state === 'HIGH') {
+                btn.classList.replace('btn-inactive', 'btn-active');
+            } else {
+                btn.classList.replace('btn-active', 'btn-inactive');
+            }
+            status.innerText = state;
+        }
+
+        socket.on('mock_update_outputs', function(data) {
+            document.getElementById('out-in1').innerText = data[17] || 'LOW';
+            document.getElementById('out-in2').innerText = data[27] || 'LOW';
+            document.getElementById('out-ena').innerText = data[22] || 'LOW';
+        });
+
+        // Request output updates periodically
+        setInterval(() => {
+            socket.emit('mock_get_outputs');
+        }, 500);
+    </script>
+</body>
+</html>
