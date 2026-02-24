@@ -758,26 +758,24 @@ def update_app():
     
     logger.info("Update requested. Starting update script...")
     
-    # Path to the update script
     update_script_path = os.path.join(os.path.dirname(__file__), 'update_script.py')
     app_path = os.path.abspath(__file__)
     
-    # Start the update script as a detached process
     if os.name == 'nt':
-        # Windows
         subprocess.Popen([sys.executable, update_script_path, app_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        # Linux
         subprocess.Popen([sys.executable, update_script_path, app_path], preexec_fn=os.setpgrp)
     
-    # Stop the current Flask app
     def shutdown():
         time.sleep(1)
         logger.info("Shutting down for update...")
         os._exit(0)
     
     Thread(target=shutdown).start()
-    return jsonify({"status": "updating"})
+    
+    response = jsonify({"status": "updating"})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
     
 app.jinja_env.filters['is_number'] = is_number
 ##################################

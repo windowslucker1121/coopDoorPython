@@ -1486,8 +1486,19 @@
         /* ── Update ────────────────────────────────── */
         function triggerUpdate() {
             if (confirm("Are you sure you want to update the application? This will restart the service.")) {
-                fetch('/update', { method: 'POST' })
-                    .then(response => response.json())
+                fetch('/update', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         alert("Update started. The page will reload in 15 seconds.");
                         setTimeout(() => {
