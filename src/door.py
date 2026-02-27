@@ -196,6 +196,15 @@ class DOOR():
         endstopUpper = GPIO.input(end_up)
         endstopLower = GPIO.input(end_down)
 
+        # When opening, ignore lower endstop changes (door is leaving it).
+        # When closing, ignore upper endstop changes (door is leaving it).
+        if self.state == "opening" and channel == end_down:
+            logger.debug("Ignoring lower endstop change while opening - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+            return
+        if self.state == "closing" and channel == end_up:
+            logger.debug("Ignoring upper endstop change while closing - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+            return
+
         if endstopUpper == compareValueUpper:
             self.stop(state="open")
             logger.info("Endstop UP hit (callback) - Upper: %s - Lower: %s", endstopUpper, endstopLower)
@@ -215,12 +224,14 @@ class DOOR():
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
 
-        if GPIO.input(end_up) == compareValueUpper:
+        # When opening, only care about the upper endstop (destination).
+        # When closing, only care about the lower endstop (destination).
+        if self.state != "closing" and GPIO.input(end_up) == compareValueUpper:
             if self.state != "open":
                 logger.info("Endstop UP detected (poll) - stopping motor")
                 self.stop(state="open")
             return True
-        if GPIO.input(end_down) == compareValueLower:
+        if self.state != "opening" and GPIO.input(end_down) == compareValueLower:
             if self.state != "closed":
                 logger.info("Endstop DOWN detected (poll) - stopping motor")
                 self.stop(state="closed")
