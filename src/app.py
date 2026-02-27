@@ -4,6 +4,7 @@ from gevent import monkey
 monkey.patch_all()
 from flask import Flask, render_template, Response, send_file, request, jsonify
 from threading import Thread, Lock
+import threading
 from flask_socketio import SocketIO
 from datetime import datetime, date, timedelta
 from protected_dict import protected_dict as global_vars
@@ -672,6 +673,10 @@ def handle_get_csv_data():
 # Static page handlers:
 ##################################
 
+@app.route('/debug')
+def debug_panel():
+    return render_template('debug.html', is_windows=(os.name == 'nt'))
+
 @app.route('/mock')
 def mock_panel():
     if os.name != 'nt':
@@ -685,6 +690,113 @@ def handle_mock_trigger_pin(data):
         pin = data['pin']
         state = GPIO.HIGH if data['state'] == 'HIGH' else GPIO.LOW
         GPIO.trigger_event(pin, state)
+
+@socketio.on('get_debug_data')
+def handle_get_debug_data():
+    import door as door_module
+    # Pin metadata
+    pin_meta = {
+        17: {"name": "in1", "purpose": "Motor UP", "direction": "OUT"},
+        27: {"name": "in2", "purpose": "Motor DOWN", "direction": "OUT"},
+        22: {"name": "ena", "purpose": "Motor Enable", "direction": "OUT"},
+        23: {"name": "end_up", "purpose": "Endstop UP", "direction": "IN"},
+        24: {"name": "end_down", "purpose": "Endstop DOWN", "direction": "IN"},
+        5:  {"name": "o_pin", "purpose": "Manual Open Switch", "direction": "IN"},
+        6:  {"name": "c_pin", "purpose": "Manual Close Switch", "direction": "IN"},
+        21: {"name": "data_pin_out", "purpose": "DHT22 Outdoor Data", "direction": "IN"},
+        16: {"name": "data_pin_in", "purpose": "DHT22 Indoor Data", "direction": "IN"},
+        20: {"name": "power_pin_out", "purpose": "DHT22 Outdoor Power", "direction": "OUT"},
+        26: {"name": "power_pin_in", "purpose": "DHT22 Indoor Power", "direction": "OUT"},
+    }
+
+    # Get GPIO pin states
+    pins_data = []
+    if os.name == 'nt':
+        from mock_gpio import GPIO as MockGPIORef
+        all_pins = MockGPIORef.get_all_pins()
+        for pin_num, meta in sorted(pin_meta.items()):
+            pin_info = all_pins.get(pin_num, {})
+            pins_data.append({
+                "pin": pin_num,
+                "name": meta["name"],
+                "purpose": meta["purpose"],
+                "direction": meta["direction"],
+                "state": pin_info.get("state", "N/A"),
+                "mode": pin_info.get("mode", "N/A")
+            })
+    else:
+        import RPi.GPIO as RealGPIO
+        for pin_num, meta in sorted(pin_meta.items()):
+            try:
+                state = "HIGH" if RealGPIO.input(pin_num) else "LOW"
+            except Exception:
+                state = "N/A"
+            pins_data.append({
+                "pin": pin_num,
+                "name": meta["name"],
+                "purpose": meta["purpose"],
+                "direction": meta["direction"],
+                "state": state,
+                "mode": meta["direction"]
+            })
+
+    # Door module constants
+    door_constants = {
+        "referenceSequenceTimeout": door_module.referenceSequenceTimeout,
+        "invert_end_up": door_module.invert_end_up,
+        "invert_end_down": door_module.invert_end_down,
+    }
+
+    # All global variables (mask secrets)
+    secrets_keys = {"vapid_private_key", "vapid_public_key"}
+    all_globals = {}
+    raw_globals = global_vars.instance().get_all()
+    for k, v in raw_globals.items():
+        if k in secrets_keys:
+            all_globals[k] = "***" if v else None
+        elif isinstance(v, datetime):
+            all_globals[k] = v.strftime("%Y-%m-%d %H:%M:%S %Z")
+        elif isinstance(v, date):
+            all_globals[k] = v.strftime("%Y-%m-%d")
+        else:
+            all_globals[k] = v
+
+    # System info
+    cpu_percent = psutil.cpu_percent(interval=0)
+    mem = psutil.virtual_memory()
+    system_info = {
+        "os_name": os.name,
+        "platform": sys.platform,
+        "python_version": sys.version,
+        "uptime": str(get_uptime()),
+        "cpu_percent": cpu_percent,
+        "memory_total_mb": round(mem.total / (1024 * 1024), 1),
+        "memory_used_mb": round(mem.used / (1024 * 1024), 1),
+        "memory_percent": mem.percent,
+    }
+
+    # Thread info
+    threads_data = []
+    for t in threading.enumerate():
+        threads_data.append({
+            "name": t.name,
+            "daemon": t.daemon,
+            "alive": t.is_alive()
+        })
+
+    # Recent log entries
+    recent_logs = list(log_buffer)
+
+    debug_payload = {
+        "pins": pins_data,
+        "door_constants": door_constants,
+        "global_vars": all_globals,
+        "system": system_info,
+        "threads": threads_data,
+        "logs": recent_logs,
+        "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    }
+    socketio.emit('debug_data', debug_payload, namespace='/')
 
 @socketio.on('mock_get_outputs')
 def handle_mock_get_outputs():
@@ -710,7 +822,8 @@ def index():
         location=global_vars.instance().get_value("location"),
         valid_locations=get_valid_locations(),
         reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms"),
-        vapid_public_key = global_vars.instance().get_value("vapid_public_key")
+        vapid_public_key = global_vars.instance().get_value("vapid_public_key"),
+        is_windows = os.name == 'nt'
     )
 
 @app.template_filter('is_number')

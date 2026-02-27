@@ -32,6 +32,10 @@ class protected_dict:
         with self._instance_lock:
             return [copy.deepcopy(self._dictionary.get(key)) for key in keys]
 
+    def get_all(self):
+        with self._instance_lock:
+            return copy.deepcopy(self._dictionary)
+
 if __name__ == '__main__':
     singleton_dict = protected_dict.instance()
     singleton_dict.set_value("key0", "value0")

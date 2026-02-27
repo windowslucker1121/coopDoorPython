@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Dinky Coop — Debug</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        /* ── CSS Variables ──────────────────────────────────── */
+        :root {
+            --bg:             #f0f2f5;
+            --surface:        #ffffff;
+            --surface-alt:    #f9f9fb;
+            --text:           #1a1a2e;
+            --text-muted:     #777;
+            --border:         #e2e2e8;
+            --shadow:         rgba(0,0,0,0.07);
+            --accent:         #317EFB;
+            --high:           #2ecc71;
+            --low:            #e74c3c;
+            --neutral:        #95a5a6;
+        }
+
+        html.dark {
+            --bg:             #1a1a2e;
+            --surface:        #23234a;
+            --surface-alt:    #2a2a52;
+            --text:           #e0e0e0;
+            --text-muted:     #999;
+            --border:         #3d3d5c;
+            --shadow:         rgba(0,0,0,0.3);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 16px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+
+        /* ── Header ───────────────────────────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .header h1 { font-size: 1.4rem; }
+        .header-actions { display: flex; gap: 8px; align-items: center; }
+        .header-actions a, .header-actions button {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .header-actions a:hover, .header-actions button:hover { opacity: 0.75; }
+
+        /* ── Timestamp banner ─────────────────────────── */
+        .timestamp {
+            text-align: right;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        /* ── Cards ────────────────────────────────────── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 6px var(--shadow);
+        }
+        .card h2 {
+            font-size: 1.05rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .card h2 .chevron {
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+            margin-left: auto;
+        }
+        .card h2 .chevron.collapsed { transform: rotate(-90deg); }
+
+        /* ── Tables ───────────────────────────────────── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: var(--surface-alt);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: var(--surface-alt); }
+
+        /* ── Pin state badges ─────────────────────────── */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-high { background: var(--high); color: #fff; }
+        .badge-low  { background: var(--low);  color: #fff; }
+        .badge-na   { background: var(--neutral); color: #fff; }
+        .badge-in   { background: #3498db; color: #fff; }
+        .badge-out  { background: #e67e22; color: #fff; }
+
+        /* ── Key/Value table for global vars ──────────── */
+        .kv-key { font-weight: 600; white-space: nowrap; width: 35%; }
+        .kv-val { word-break: break-all; }
+        .kv-val.none { color: var(--text-muted); font-style: italic; }
+
+        /* ── Log area ─────────────────────────────────── */
+        .log-area {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.72rem;
+            line-height: 1.5;
+        }
+        .log-area div { white-space: pre-wrap; }
+
+        /* ── Thread badges ────────────────────────────── */
+        .badge-alive  { background: var(--high); color: #fff; }
+        .badge-dead   { background: var(--low);  color: #fff; }
+        .badge-daemon { background: #9b59b6; color: #fff; }
+
+        /* ── Responsive ───────────────────────────────── */
+        @media (max-width: 600px) {
+            body { padding: 8px; }
+            .card { padding: 12px; }
+            table { font-size: 0.75rem; }
+            th, td { padding: 4px 6px; }
+        }
+
+        /* ── Collapsible section ──────────────────────── */
+        .section-body { overflow: hidden; transition: max-height 0.3s ease; }
+        .section-body.collapsed { max-height: 0 !important; padding: 0; }
+    </style>
+</head>
+<body>
+    <!-- ── Header ─────────────────────────────────── -->
+    <div class="header">
+        <h1>🐛 Debug Panel</h1>
+        <div class="header-actions">
+            <a href="/">← Back</a>
+            {% if is_windows %}
+            <a href="/mock">🧪 Mock</a>
+            {% endif %}
+            <button id="toggleTheme">🌙 Dark Mode</button>
+        </div>
+    </div>
+    <div class="timestamp" id="lastUpdate">Waiting for data...</div>
+
+    <!-- ── GPIO Pin States ────────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('pinsSection', this)">📌 GPIO Pin States <span class="chevron">▼</span></h2>
+        <div id="pinsSection" class="section-body">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pin (BCM)</th>
+                        <th>Name</th>
+                        <th>Purpose</th>
+                        <th>Direction</th>
+                        <th>State</th>
+                    </tr>
+                </thead>
+                <tbody id="pinsTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Door Configuration ─────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('doorSection', this)">🚪 Door Configuration <span class="chevron">▼</span></h2>
+        <div id="doorSection" class="section-body">
+            <table>
+                <tbody id="doorTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Global Variables ───────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('globalsSection', this)">🌐 Global Variables <span class="chevron">▼</span></h2>
+        <div id="globalsSection" class="section-body">
+            <table>
+                <thead>
+                    <tr><th>Key</th><th>Value</th></tr>
+                </thead>
+                <tbody id="globalsTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── System Info ────────────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('systemSection', this)">🖥️ System Info <span class="chevron">▼</span></h2>
+        <div id="systemSection" class="section-body">
+            <table>
+                <tbody id="systemTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Threads ────────────────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('threadsSection', this)">🧵 Threads <span class="chevron">▼</span></h2>
+        <div id="threadsSection" class="section-body">
+            <table>
+                <thead>
+                    <tr><th>Name</th><th>Daemon</th><th>Status</th></tr>
+                </thead>
+                <tbody id="threadsTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Log Buffer ─────────────────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('logSection', this)">📜 Log Buffer (last 100) <span class="chevron">▼</span></h2>
+        <div id="logSection" class="section-body">
+            <div class="log-area" id="logArea"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        // ── Section collapse ────────────────────────
+        function toggleSection(sectionId, headerEl) {
+            const section = document.getElementById(sectionId);
+            const chevron = headerEl.querySelector('.chevron');
+            section.classList.toggle('collapsed');
+            chevron.classList.toggle('collapsed');
+        }
+
+        // ── Theme toggle ────────────────────────────
+        const themeBtn = document.getElementById('toggleTheme');
+        function applyTheme(dark) {
+            document.documentElement.classList.toggle('dark', dark);
+            themeBtn.textContent = dark ? '☀️ Light Mode' : '🌙 Dark Mode';
+            localStorage.setItem('theme', dark ? 'dark' : 'light');
+        }
+        applyTheme(localStorage.getItem('theme') === 'dark');
+        themeBtn.addEventListener('click', () => {
+            applyTheme(!document.documentElement.classList.contains('dark'));
+        });
+
+        // ── Helper: state badge ─────────────────────
+        function stateBadge(state) {
+            if (state === 'HIGH') return '<span class="badge badge-high">HIGH</span>';
+            if (state === 'LOW')  return '<span class="badge badge-low">LOW</span>';
+            return '<span class="badge badge-na">' + esc(state) + '</span>';
+        }
+        function dirBadge(dir) {
+            if (dir === 'IN')  return '<span class="badge badge-in">IN</span>';
+            if (dir === 'OUT') return '<span class="badge badge-out">OUT</span>';
+            return esc(dir);
+        }
+        function esc(s) {
+            const el = document.createElement('span');
+            el.textContent = s == null ? 'None' : String(s);
+            return el.innerHTML;
+        }
+
+        // ── Render functions ────────────────────────
+        function renderPins(pins) {
+            const tbody = document.getElementById('pinsTable');
+            tbody.innerHTML = pins.map(p => `
+                <tr>
+                    <td><strong>${p.pin}</strong></td>
+                    <td>${esc(p.name)}</td>
+                    <td>${esc(p.purpose)}</td>
+                    <td>${dirBadge(p.direction)}</td>
+                    <td>${stateBadge(p.state)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderKV(tableId, obj) {
+            const tbody = document.getElementById(tableId);
+            tbody.innerHTML = Object.entries(obj).map(([k, v]) => {
+                let display;
+                if (v === null || v === undefined) {
+                    display = '<span class="none">None</span>';
+                } else if (typeof v === 'object') {
+                    display = esc(JSON.stringify(v, null, 2));
+                } else {
+                    display = esc(v);
+                }
+                return `<tr><td class="kv-key">${esc(k)}</td><td class="kv-val">${display}</td></tr>`;
+            }).join('');
+        }
+
+        function renderThreads(threads) {
+            const tbody = document.getElementById('threadsTable');
+            tbody.innerHTML = threads.map(t => `
+                <tr>
+                    <td>${esc(t.name)}</td>
+                    <td>${t.daemon ? '<span class="badge badge-daemon">daemon</span>' : '—'}</td>
+                    <td>${t.alive
+                        ? '<span class="badge badge-alive">alive</span>'
+                        : '<span class="badge badge-dead">dead</span>'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderLogs(logs) {
+            const area = document.getElementById('logArea');
+            area.innerHTML = logs.map(l => '<div>' + esc(l) + '</div>').join('');
+            area.scrollTop = area.scrollHeight;
+        }
+
+        // ── Socket.IO data handler ──────────────────
+        socket.on('debug_data', function(data) {
+            document.getElementById('lastUpdate').textContent = 'Last update: ' + data.timestamp;
+            renderPins(data.pins);
+            renderKV('doorTable', data.door_constants);
+            renderKV('globalsTable', data.global_vars);
+            renderKV('systemTable', data.system);
+            renderThreads(data.threads);
+            renderLogs(data.logs);
+        });
+
+        // ── Poll for debug data every 1s ────────────
+        function requestDebugData() {
+            socket.emit('get_debug_data');
+        }
+        requestDebugData();
+        setInterval(requestDebugData, 1000);
+    </script>
+</body>
+</html>
