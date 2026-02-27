@@ -12,6 +12,10 @@ else:
 
 GPIO.setwarnings(False)
 import time
+# Save the original (unpatched) time.sleep BEFORE gevent's monkey.patch_all()
+# replaces it. RPi.GPIO interrupt callbacks run in native C threads where
+# gevent.sleep is unreliable, so we must use the real OS sleep there.
+_hw_sleep = time.sleep
 #timeout where the reference sequence quits if it takes too long (in seconds)
 referenceSequenceTimeout=60
 
@@ -176,10 +180,30 @@ class DOOR():
     def endstop_hit(self, channel):
         if self.reference_door_active:
             return
-        time.sleep(0.2)
 
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+
+        # Read pins IMMEDIATELY — don't sleep first.  The old code slept
+        # 0.2 s before reading, but gevent.sleep is unreliable inside
+        # RPi.GPIO's native callback thread, so the read often returned
+        # stale / zero values.
+        endstopUpper = GPIO.input(end_up)
+        endstopLower = GPIO.input(end_down)
+
+        if endstopUpper == compareValueUpper:
+            self.stop(state="open")
+            logger.info("Endstop UP hit - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+            return
+        if endstopLower == compareValueLower:
+            self.stop(state="closed")
+            logger.info("Endstop DOWN hit - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+            return
+
+        # Debounce: if neither endstop was clearly triggered on the first
+        # read, wait a bit using the real (unpatched) OS sleep so we don't
+        # depend on gevent's hub, then re-read.
+        _hw_sleep(0.15)
 
         endstopUpper = GPIO.input(end_up)
         endstopLower = GPIO.input(end_down)
@@ -187,7 +211,7 @@ class DOOR():
             self.stop(state="open")
         elif endstopLower == compareValueLower:
             self.stop(state="closed")
-        logger.info("Endstops changed - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+        logger.info("Endstops changed (debounced) - Upper: %s - Lower: %s", endstopUpper, endstopLower)
         
     # Open or close door if switch activated:
     def switch_activated(self, channel):
@@ -196,9 +220,8 @@ class DOOR():
         
         if self.reference_door_active:
             return
-        # Wait just a bit for stability, so we make sure we get
-        # a good reading right after the interrupt.
-        time.sleep(0.15)
+        # Use the real OS sleep for debounce (safe in RPi.GPIO's thread).
+        _hw_sleep(0.15)
         o_read = GPIO.input(o_pin)
         c_read = GPIO.input(c_pin)
         if o_read != c_read:
