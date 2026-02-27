@@ -404,8 +404,7 @@ def door_task():
 
             # If we are in override mode, then the door is being moved by the switch.
             if door_override:
-                door.check_endstops()
-
+                ##TODO check how this even works, i cant see that it works at all - atleast not fully controlled by the raspberry pi
                 # See if switch is turned off, if so, stop the door.
                 door.check_if_switch_neutral()
 
