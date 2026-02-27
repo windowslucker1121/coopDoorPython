@@ -331,11 +331,19 @@
             padding: 0;
         }
 
-        /* ── Theme button ───────────────────────────────────── */
-        .theme-btn {
+        /* ── Top bar (fixed button row) ──────────────────── */
+        .top-bar {
             position: fixed;
             top: 12px;
             right: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            z-index: 50;
+        }
+
+        /* ── Theme button ───────────────────────────────────── */
+        .theme-btn {
             padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 20px;
@@ -346,16 +354,12 @@
             font-weight: 600;
             box-shadow: 0 2px 6px var(--shadow);
             transition: background 0.2s;
-            z-index: 50;
         }
 
         .theme-btn:hover { opacity: 0.85; }
 
         /* ── Debug button ──────────────────────────────────── */
         .debug-btn {
-            position: fixed;
-            top: 12px;
-            right: 338px;
             padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 20px;
@@ -366,7 +370,6 @@
             font-weight: 600;
             box-shadow: 0 2px 6px var(--shadow);
             transition: background 0.2s;
-            z-index: 50;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
@@ -376,9 +379,6 @@
 
         /* ── Mock button ───────────────────────────────────── */
         .mock-btn {
-            position: fixed;
-            top: 12px;
-            right: 248px;
             padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 20px;
@@ -389,7 +389,6 @@
             font-weight: 600;
             box-shadow: 0 2px 6px var(--shadow);
             transition: background 0.2s;
-            z-index: 50;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
@@ -398,9 +397,6 @@
         .mock-btn:hover { opacity: 0.85; }
 
         .mock-btn-disabled {
-            position: fixed;
-            top: 12px;
-            right: 248px;
             padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 20px;
@@ -410,18 +406,13 @@
             font-size: 0.82rem;
             font-weight: 600;
             box-shadow: 0 2px 6px var(--shadow);
-            z-index: 50;
             opacity: 0.4;
             display: inline-flex;
             align-items: center;
-            position: relative;
         }
 
         .mock-btn-disabled-wrapper {
-            position: fixed;
-            top: 12px;
-            right: 248px;
-            z-index: 50;
+            position: relative;
         }
 
         .mock-btn-disabled-wrapper:hover .mock-tooltip {
@@ -445,9 +436,6 @@
 
         /* ── Update button ──────────────────────────────────── */
         .update-btn {
-            position: fixed;
-            top: 12px;
-            right: 130px;
             padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 20px;
@@ -458,7 +446,6 @@
             font-weight: 600;
             box-shadow: 0 2px 6px var(--shadow);
             transition: background 0.2s;
-            z-index: 50;
         }
 
         .update-btn:hover { opacity: 0.85; }
@@ -892,24 +879,27 @@
         </div>
     </div>
 
-    <!-- Theme toggle -->
-    <button class="theme-btn" id="toggleTheme">🌙 Dark Mode</button>
+    <!-- Top bar: fixed button row -->
+    <div class="top-bar">
+        <!-- Debug panel button -->
+        <a class="debug-btn" href="/debug">🐛 Debug</a>
 
-    <!-- Update button -->
-    <button class="update-btn" id="updateApp" onclick="triggerUpdate()">🔄 Update</button>
+        <!-- Mock panel button -->
+        {% if is_windows %}
+        <a class="mock-btn" href="/mock">🧪 Mock</a>
+        {% else %}
+        <div class="mock-btn-disabled-wrapper">
+            <span class="mock-btn-disabled">🧪 Mock</span>
+            <div class="mock-tooltip">Deactivated — real hardware in use</div>
+        </div>
+        {% endif %}
 
-    <!-- Mock panel button -->
-    {% if is_windows %}
-    <a class="mock-btn" href="/mock">🧪 Mock</a>
-    {% else %}
-    <div class="mock-btn-disabled-wrapper">
-        <span class="mock-btn-disabled">🧪 Mock</span>
-        <div class="mock-tooltip">Deactivated — real hardware in use</div>
+        <!-- Update button -->
+        <button class="update-btn" id="updateApp" onclick="triggerUpdate()">🔄 Update</button>
+
+        <!-- Theme toggle -->
+        <button class="theme-btn" id="toggleTheme">🌙 Dark Mode</button>
     </div>
-    {% endif %}
-
-    <!-- Debug panel button -->
-    <a class="debug-btn" href="/debug">🐛 Debug</a>
 
     <div class="container">
         <h1 class="page-title">Coop Door</h1>
