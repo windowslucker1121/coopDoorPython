@@ -64,8 +64,8 @@ class DOOR():
         GPIO.setup(end_up, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(end_down, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
-        GPIO.add_event_detect(end_up, GPIO.BOTH, callback=self.endstop_hit, bouncetime=250)
-        GPIO.add_event_detect(end_down, GPIO.BOTH, callback=self.endstop_hit, bouncetime=250)
+        GPIO.add_event_detect(end_up, GPIO.FALLING if invert_end_up else GPIO.RISING, callback=self.endstop_hit, bouncetime=250)
+        GPIO.add_event_detect(end_down, GPIO.FALLING if invert_end_down else GPIO.RISING, callback=self.endstop_hit, bouncetime=250)
 
     def clear_errorState(self):
         self.errorState = None
@@ -172,11 +172,27 @@ class DOOR():
         logger.info("Referenced endstops in " + str(time_taken_ms) + "ms")
         return True
 
+    # Check endstops and stop the motor if either is active (polling fallback)
+    def check_endstops(self):
+        if self.reference_door_active:
+            return
+        compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
+        compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+
+        endstopUpper = GPIO.input(end_up)
+        endstopLower = GPIO.input(end_down)
+        if endstopUpper == compareValueUpper and self.state == "opening":
+            logger.info("check_endstops: Upper endstop active, stopping motor")
+            self.stop(state="open")
+        elif endstopLower == compareValueLower and self.state == "closing":
+            logger.info("check_endstops: Lower endstop active, stopping motor")
+            self.stop(state="closed")
+
     #endstop is hit, stop the motor
     def endstop_hit(self, channel):
         if self.reference_door_active:
             return
-        time.sleep(0.2)
+        time.sleep(0.05)
 
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
@@ -206,12 +222,16 @@ class DOOR():
                 #logger.debug("Opening!")
                 logger.debug("Manuel Switch to UP activated.")
                 self.override = True
-                self.open()
+                self.check_endstops()
+                if self.state not in ["open", "closed"]:
+                    self.open()
             elif c_read == GPIO.HIGH:
                 #logger.debug("Closing!")
                 logger.debug("Manuel Switch to DOWN activated.")
                 self.override = True
-                self.close()
+                self.check_endstops()
+                if self.state not in ["open", "closed"]:
+                    self.close()
 
     # When called, stops door if switch is neutral.
     def check_if_switch_neutral(self, nuetral_state="stopped"):
