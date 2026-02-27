@@ -874,10 +874,11 @@ def update_app():
     update_script_path = os.path.join(os.path.dirname(__file__), 'update_script.py')
     app_path = os.path.abspath(__file__)
     
+    pid = str(os.getpid())
     if os.name == 'nt':
-        subprocess.Popen([sys.executable, update_script_path, app_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen([sys.executable, update_script_path, app_path, pid], creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        subprocess.Popen([sys.executable, update_script_path, app_path], preexec_fn=os.setpgrp)
+        subprocess.Popen([sys.executable, update_script_path, app_path, pid], preexec_fn=os.setpgrp)
     
     def shutdown():
         time.sleep(1)

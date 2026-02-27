@@ -2,11 +2,27 @@ import sys
 import time
 import subprocess
 import os
+import signal
 
 def main():
     # Wait for the main process to exit
+    parent_pid = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    if parent_pid:
+        print(f"Killing main process (PID: {parent_pid})...")
+        try:
+            os.kill(parent_pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            print("Process already exited.")
+    
+    # Wait for the main process to fully exit
     print("Waiting for main process to exit...")
     time.sleep(3)
+    
+    print("Killing libgpiod_pulsein64...")
+    try:
+        subprocess.run(["killall", "libgpiod_pulsein64"], check=False)
+    except FileNotFoundError:
+        print("killall not found, skipping.")
     
     # Run git pull
     print("Running git pull...")
