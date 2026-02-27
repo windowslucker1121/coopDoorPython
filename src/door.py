@@ -178,40 +178,54 @@ class DOOR():
 
     #endstop is hit, stop the motor
     def endstop_hit(self, channel):
+        """GPIO edge-detect callback — must be completely non-blocking.
+
+        On a real Pi this runs in RPi.GPIO's native C thread; on Windows
+        (mock) it runs synchronously inside the SocketIO greenlet.  Any
+        blocking call (including _hw_sleep) would freeze the gevent event
+        loop and cause missed events.  So we only do an immediate read.
+        The door_task polling loop (via check_endstops / open / close)
+        acts as the reliable safety-net if the immediate read misses due
+        to contact bounce."""
         if self.reference_door_active:
             return
 
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
 
-        # Read pins IMMEDIATELY — don't sleep first.  The old code slept
-        # 0.2 s before reading, but gevent.sleep is unreliable inside
-        # RPi.GPIO's native callback thread, so the read often returned
-        # stale / zero values.
         endstopUpper = GPIO.input(end_up)
         endstopLower = GPIO.input(end_down)
 
         if endstopUpper == compareValueUpper:
             self.stop(state="open")
-            logger.info("Endstop UP hit - Upper: %s - Lower: %s", endstopUpper, endstopLower)
-            return
-        if endstopLower == compareValueLower:
-            self.stop(state="closed")
-            logger.info("Endstop DOWN hit - Upper: %s - Lower: %s", endstopUpper, endstopLower)
-            return
-
-        # Debounce: if neither endstop was clearly triggered on the first
-        # read, wait a bit using the real (unpatched) OS sleep so we don't
-        # depend on gevent's hub, then re-read.
-        _hw_sleep(0.15)
-
-        endstopUpper = GPIO.input(end_up)
-        endstopLower = GPIO.input(end_down)
-        if endstopUpper == compareValueUpper:
-            self.stop(state="open")
+            logger.info("Endstop UP hit (callback) - Upper: %s - Lower: %s", endstopUpper, endstopLower)
         elif endstopLower == compareValueLower:
             self.stop(state="closed")
-        logger.info("Endstops changed (debounced) - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+            logger.info("Endstop DOWN hit (callback) - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+        else:
+            logger.debug("Endstop edge fired but no endstop active - Upper: %s - Lower: %s", endstopUpper, endstopLower)
+
+    def check_endstops(self) -> bool:
+        """Poll endstop pins directly.  Called every door_task iteration
+        as a reliable safety-net independent of edge-detect callbacks.
+        Returns True if an endstop is currently triggered."""
+        if self.reference_door_active:
+            return False
+
+        compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
+        compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
+
+        if GPIO.input(end_up) == compareValueUpper:
+            if self.state != "open":
+                logger.info("Endstop UP detected (poll) - stopping motor")
+                self.stop(state="open")
+            return True
+        if GPIO.input(end_down) == compareValueLower:
+            if self.state != "closed":
+                logger.info("Endstop DOWN detected (poll) - stopping motor")
+                self.stop(state="closed")
+            return True
+        return False
         
     # Open or close door if switch activated:
     def switch_activated(self, channel):
@@ -220,8 +234,10 @@ class DOOR():
         
         if self.reference_door_active:
             return
-        # Use the real OS sleep for debounce (safe in RPi.GPIO's thread).
-        _hw_sleep(0.15)
+        # Small debounce — use _hw_sleep (real OS sleep) so it works in
+        # RPi.GPIO's native thread on the Pi.  On Windows/mock this is a
+        # brief pause; acceptable because switch events are infrequent.
+        _hw_sleep(0.05)
         o_read = GPIO.input(o_pin)
         c_read = GPIO.input(c_pin)
         if o_read != c_read:

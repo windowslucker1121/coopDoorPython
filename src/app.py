@@ -408,6 +408,15 @@ def door_task():
                         global_vars.instance().set_value("desired_door_state", "closed")
                 
 
+            # Poll endstops every iteration as a reliable safety-net.
+            # Edge-detect callbacks can be missed (bounce, gevent blocking,
+            # etc.), so this direct GPIO read guarantees the motor stops
+            # within one iteration (~0.5 s) of reaching an endstop.
+            if door.check_endstops():
+                # An endstop was just triggered — re-read the door state
+                # so the rest of this iteration uses the updated value.
+                door_state = door.get_state()
+
             # If we are in override mode, then the door is being moved by the switch.
             if door_override:
                 # See if switch is turned off, if so, stop the door.
