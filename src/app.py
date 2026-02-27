@@ -333,6 +333,7 @@ def door_task():
     sunset = None
     sentErrorNotification = False
     thread_sleep_time = 0.5
+    last_d_door_state = None
 
     while True:
         toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
@@ -366,6 +367,11 @@ def door_task():
 
             auto_mode = auto_mode == "True"
             door.set_auto_mode(auto_mode)
+
+            if d_door_state != last_d_door_state:
+                door_move_count = 0
+                last_d_door_state = d_door_state
+
             #logger.debug("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
             # If we are in auto mode then open or close the door based on sunrise
             # or sunset times.
@@ -404,15 +410,12 @@ def door_task():
 
             # If we are in override mode, then the door is being moved by the switch.
             if door_override:
-                ##TODO check how this even works, i cant see that it works at all - atleast not fully controlled by the raspberry pi
                 # See if switch is turned off, if so, stop the door.
                 door.check_if_switch_neutral()
 
-                # Set the desired state to stopped, so that
-                # when override switch is no longer being used,
-                # we don't move the motor until a new button is
-                # pressed.
-                global_vars.instance().set_value("desired_door_state", "stopped")
+                # Set the desired state to the door's actual position so
+                # we don't create a state mismatch when override ends (Fix #3)
+                global_vars.instance().set_value("desired_door_state", door.get_state())
 
             # If the door state does not match the desired door state, then
             # we need to move the door.
@@ -435,10 +438,10 @@ def door_task():
                     match d_door_state:
                         case "stopped":
                             if door_state in ["open", "closed"]:
-                                if door_move_count != -1: 
-                                    logger.debug("stop because door is in open or closed state (%s)", door_state)
-                                    door_move_count = -1
+                                logger.debug("stop: door already at endstop (%s), reconciling desired state", door_state)
                                 door.stop(door_state)
+                                global_vars.instance().set_value("desired_door_state", door_state)
+                                door_move_count = 0
                             else:
                                 logger.debug("stop because door is in moving state")
                                 door.stop()
