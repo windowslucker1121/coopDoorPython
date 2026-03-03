@@ -1584,6 +1584,8 @@
             const sunrise_offset = document.getElementById('sunrise_offset').value;
             const sunset_offset  = document.getElementById('sunset_offset').value;
             socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
+            localStorage.setItem('sunrise_offset', sunrise_offset);
+            localStorage.setItem('sunset_offset',  sunset_offset);
         }
 
         /* ── CSV Chart ─────────────────────────────── */
@@ -1662,15 +1664,34 @@
         }
 
         /* ── Collapsibles ──────────────────────────── */
+        const COLLAPSIBLE_IDS = [
+            'errorSection', 'webcam_section', 'door_control',
+            'system', 'temperature', 'location', 'manual_location_inputs',
+            'dataVisualizationSection', 'logSection'
+        ];
+
         function toggleSection(id, headerEl) {
-            const section = document.getElementById(id);
+            const section  = document.getElementById(id);
             const isHidden = section.style.display === "none";
             section.style.display = isHidden ? "block" : "none";
             if (headerEl) headerEl.classList.toggle('collapsed', !isHidden);
+            localStorage.setItem('section-' + id, isHidden ? 'open' : 'closed');
         }
 
-        document.querySelectorAll('.content-section').forEach(s => {
-            s.style.display = "block";
+        // Restore saved collapse states (default: open)
+        COLLAPSIBLE_IDS.forEach(id => {
+            const section = document.getElementById(id);
+            if (!section) return;
+            const saved  = localStorage.getItem('section-' + id);
+            const header = section.previousElementSibling;
+            const hasHeader = header && header.classList.contains('collapsible-header');
+            if (saved === 'closed') {
+                section.style.display = "none";
+                if (hasHeader) header.classList.add('collapsed');
+            } else {
+                section.style.display = "block";
+                if (hasHeader) header.classList.remove('collapsed');
+            }
         });
 
         /* ── Modal ─────────────────────────────────── */
@@ -1741,6 +1762,11 @@
             const currentTheme  = localStorage.getItem('theme') || 'light';
             document.documentElement.setAttribute('data-theme', currentTheme);
             themeButton.textContent = currentTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+
+            const savedSunrise = localStorage.getItem('sunrise_offset');
+            const savedSunset  = localStorage.getItem('sunset_offset');
+            if (savedSunrise !== null) document.getElementById('sunrise_offset').value = savedSunrise;
+            if (savedSunset  !== null) document.getElementById('sunset_offset').value  = savedSunset;
 
             themeButton.addEventListener('click', () => {
                 const cur  = document.documentElement.getAttribute('data-theme');
