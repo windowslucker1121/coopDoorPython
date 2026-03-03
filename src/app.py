@@ -334,6 +334,16 @@ def door_task():
     sentErrorNotification = False
     thread_sleep_time = 0.5
     last_d_door_state = None
+    # --- Auto-close premature lower-endstop retry state ---
+    # If the lower endstop fires during an auto-close in less than
+    # PREMATURE_CLOSE_THRESHOLD * reference_time, we assume something
+    # (e.g. a chicken) triggered it falsely.  We stop, wait 5 s, and
+    # retry.  Three consecutive false triggers → error state.
+    auto_close_premature_count = 0
+    auto_close_retry_pending = False
+    auto_close_retry_time = None
+    was_door_closing = False          # door state at end of previous iteration
+    PREMATURE_CLOSE_THRESHOLD = 0.8  # require ≥80 % of reference travel time
 
     while True:
         toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
@@ -347,6 +357,11 @@ def door_task():
             door.clear_errorState()
             global_vars.instance().set_value("clear_error_state", False)
             sentErrorNotification = False
+            # Also reset the premature-endstop retry state so the door gets
+            # a clean slate after the operator acknowledges the error.
+            auto_close_premature_count = 0
+            auto_close_retry_pending = False
+            auto_close_retry_time = None
         
         if toogle_reference_of_endstops:
             logger.info("Referencing door endstops, waiting for completion.")
@@ -358,6 +373,9 @@ def door_task():
             
             global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
             logger.info("Reference Sequence Successfull with total time: %s milliseconds", door.reference_door_endstops_ms)
+            # After a reference sequence the door state is fresh; don't let
+            # a stale was_door_closing flag cause a spurious premature detection.
+            was_door_closing = False
         else:
             # Get state and desired state:
             door_state = door.get_state()
@@ -416,6 +434,95 @@ def door_task():
                 # An endstop was just triggered — re-read the door state
                 # so the rest of this iteration uses the updated value.
                 door_state = door.get_state()
+
+            # ----------------------------------------------------------------
+            # Premature lower-endstop detection during auto-close.
+            #
+            # Physical setup: the lower endstop sits at the motor (top of
+            # door). It fires when the rope loses tension, i.e. when the
+            # door rope goes slack — normally because the door has fully
+            # reached the ground.  A chicken can hop through the narrowing
+            # gap and push the door up momentarily, releasing rope tension
+            # and triggering the endstop before the door is actually closed.
+            #
+            # Detection: if the door transitioned closing → closed in less
+            # than PREMATURE_CLOSE_THRESHOLD * reference_time, it is
+            # considered a false trigger.  We stop for 5 s then retry.
+            # Three consecutive false triggers → error state.
+            # ----------------------------------------------------------------
+            if (auto_mode and not door_override
+                    and was_door_closing and door_state == "closed"
+                    and d_door_state == "closed"
+                    and door.startedMovingTime is not None
+                    and reference_door_endstops_ms is not None):
+                elapsed_close_s = time.time() - door.startedMovingTime
+                ref_close_s = reference_door_endstops_ms / 1000.0
+                if elapsed_close_s < ref_close_s * PREMATURE_CLOSE_THRESHOLD:
+                    auto_close_premature_count += 1
+                    logger.warning(
+                        "Premature lower endstop during auto-close "
+                        "(elapsed=%.2fs, ref=%.2fs, attempt=%d/3)",
+                        elapsed_close_s, ref_close_s, auto_close_premature_count
+                    )
+                    if auto_close_premature_count >= 3:
+                        logger.critical(
+                            "Auto-close blocked 3 times by premature lower endstop "
+                            "— entering error state."
+                        )
+                        door.ErrorState(
+                            "Auto-close: lower endstop triggered prematurely 3 times "
+                            "in a row (chicken in doorway?)",
+                            stopDoor=True
+                        )
+                        global_vars.instance().set_value("desired_door_state", "stopped")
+                        send_push_notification(
+                            "Door Error",
+                            "Auto-close failed: lower endstop triggered prematurely "
+                            "3 times. Please check the coop."
+                        )
+                        auto_close_premature_count = 0
+                        auto_close_retry_pending = False
+                        auto_close_retry_time = None
+                    else:
+                        # Physically stop the motor and mark state as
+                        # "stopped" so the desired-state mismatch logic will
+                        # retrigger a close command after the cooldown.
+                        door.stop(state="stopped")
+                        door_state = door.get_state()
+                        global_vars.instance().set_value("desired_door_state", "stopped")
+                        auto_close_retry_pending = True
+                        auto_close_retry_time = time.time() + 5.0
+                        logger.info(
+                            "Auto-close retry scheduled in 5 s (attempt %d/3).",
+                            auto_close_premature_count
+                        )
+                else:
+                    # Endstop triggered at the expected time — genuine close.
+                    logger.debug(
+                        "Auto-close timing valid (elapsed=%.2fs, ref=%.2fs). "
+                        "Resetting premature counter.",
+                        elapsed_close_s, ref_close_s
+                    )
+                    auto_close_premature_count = 0
+                    auto_close_retry_pending = False
+                    auto_close_retry_time = None
+
+            # Fire the auto-close retry once the 5-second cooldown has elapsed.
+            if (auto_close_retry_pending
+                    and auto_close_retry_time is not None
+                    and time.time() >= auto_close_retry_time):
+                logger.info("Auto-close retry: re-issuing close command.")
+                auto_close_retry_pending = False
+                auto_close_retry_time = None
+                global_vars.instance().set_value("desired_door_state", "closed")
+                # Re-read so this iteration's logic sees the updated desired state.
+                d_door_state = "closed"
+
+            # Reset retry state whenever we leave auto mode or enter override.
+            if not auto_mode or door_override:
+                auto_close_premature_count = 0
+                auto_close_retry_pending = False
+                auto_close_retry_time = None
 
             # If we are in override mode, then the door is being moved by the switch.
             if door_override:
@@ -492,6 +599,10 @@ def door_task():
             first_iter = False
             door_state = door.get_state()
             door_override = door.get_override()
+
+            # Record whether the door is currently closing so the next
+            # iteration can detect a closing → closed transition.
+            was_door_closing = (door_state == "closing")
             
             global_vars.instance().set_values({ \
                 "state": door_state, \
