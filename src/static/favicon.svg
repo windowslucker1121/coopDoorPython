@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Dinky Coop — chicken coop door">
+  <title>Dinky Coop</title>
+  <defs>
+    <!-- Clip everything to a rounded square  -->
+    <clipPath id="c">
+      <rect width="100" height="100" rx="18" ry="18"/>
+    </clipPath>
+  </defs>
+
+  <!-- ── Background (app blue) ─────────────────────────────── -->
+  <rect width="100" height="100" rx="18" ry="18" fill="#317EFB"/>
+
+  <g clip-path="url(#c)">
+    <!-- ── Sky (light blue) inside the door frame ──────────── -->
+    <rect x="22" y="18" width="56" height="64" fill="#b8d4f5"/>
+
+    <!-- ── Ground strip ──────────────────────────────────────── -->
+    <rect x="0" y="80" width="100" height="20" fill="#4a6b2a"/>
+
+    <!-- ── Left post ─────────────────────────────────────────── -->
+    <rect x="10" y="12" width="12" height="70" rx="2" fill="#8B6F47"/>
+    <!-- ── Right post ─────────────────────────────────────────── -->
+    <rect x="78" y="12" width="12" height="70" rx="2" fill="#8B6F47"/>
+    <!-- ── Top beam ───────────────────────────────────────────── -->
+    <rect x="10" y="10" width="80" height="12" rx="2" fill="#8B6F47"/>
+
+    <!-- ── Door panel — half open ────────────────────────────── -->
+    <rect x="22" y="50" width="56" height="32" rx="1" fill="#c8a96e"/>
+    <!-- slats -->
+    <rect x="25" y="54" width="50" height="4" rx="1" fill="#d9bc84"/>
+    <rect x="25" y="62" width="50" height="4" rx="1" fill="#d9bc84"/>
+    <rect x="25" y="70" width="50" height="4" rx="1" fill="#d9bc84"/>
+
+    <!-- ── Frame border overlay ───────────────────────────────── -->
+    <rect x="22" y="18" width="56" height="64" rx="1"
+          fill="none" stroke="#5a4a30" stroke-width="2.5"/>
+  </g>
+</svg>

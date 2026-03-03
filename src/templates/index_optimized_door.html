@@ -5,12 +5,11 @@
     <meta charset="UTF-8">
     <meta name="theme-color" content="#317EFB"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="{{url_for('static', filename='icons/icon_144x144.png')}}" type="image/png">
-    <link rel="icon" href="{{url_for('static', filename='icons/icon_192x192.png')}}" type="image/png">
-    <link rel="icon" href="{{url_for('static', filename='icons/icon_512x512.png')}}" type="image/png">
-    <link rel="apple-touch-icon" href="{{url_for('static', filename='icons/icon_144x144.png')}}" type="image/png">
-    <link rel="apple-touch-icon" href="{{url_for('static', filename='icons/icon_192x192.png')}}" type="image/png">
-    <link rel="apple-touch-icon" href="{{url_for('static', filename='icons/icon_512x512.png')}}" type="image/png">
+    <!-- Favicon: SVG (modern browsers) + PNG fallbacks -->
+    <link rel="icon" type="image/svg+xml"  href="{{url_for('static', filename='favicon.svg')}}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{url_for('static', filename='favicon_32.png')}}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{url_for('static', filename='favicon_16.png')}}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{url_for('static', filename='icons/icon_192x192.png')}}">
     <link rel="manifest" href="/manifest.json">
     <style>
         /* ── CSS Variables ──────────────────────────────────── */

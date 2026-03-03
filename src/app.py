@@ -686,6 +686,13 @@ def is_number(value):
     except Exception:
         return False
     
+@app.route('/favicon.ico')
+def serve_favicon():
+    return send_file(
+        os.path.join('static', 'favicon_32.png'),
+        mimetype='image/png',
+    )
+
 @app.route('/manifest.json')
 def serve_manifest():
     return send_file('manifest.json', mimetype='application/manifest+json')
