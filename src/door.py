@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import logging
 from protected_dict import protected_dict as global_vars
@@ -287,16 +289,26 @@ class DOOR():
             else:
                 self.stop(state=nuetral_state)
 
-    def get_state(self):
+    def get_state(self) -> str:
         return self.state
 
-    def get_override(self):
+    def get_override(self) -> bool:
         return self.override
 
-    def set_auto_mode(self, auto_mode):
+    def get_started_moving_time(self) -> float | None:
+        """Return the timestamp (time.time()) when the door last started moving.
+
+        Set on every transition in to 'opening' or 'closing'. Used by
+        DoorService.get_elapsed_closing_ms() to compute how long the closing
+        stroke has been running, which is compared against the calibrated
+        reference time to detect chicken obstructions.
+        """
+        return self.startedMovingTime
+
+    def set_auto_mode(self, auto_mode: bool) -> None:
         self.auto_mode = auto_mode
 
-    def stop(self, state="stopped"):
+    def stop(self, state: str = "stopped") -> None:
         GPIO.output(in1, GPIO.LOW)
         GPIO.output(in2, GPIO.LOW)
         GPIO.output(ena, GPIO.LOW)
@@ -308,7 +320,7 @@ class DOOR():
         self.state = state
         
 
-    def open(self):
+    def open(self) -> None:
         if self.ErrorState():
             return
         upperEndStopTriggered = GPIO.input(end_up)
@@ -331,7 +343,7 @@ class DOOR():
             self.lastState = self.state
         
 
-    def close(self):
+    def close(self) -> None:
         if self.ErrorState():
             return
         
@@ -353,19 +365,7 @@ class DOOR():
             self.lastState = self.state
             logger.info("GPIO - Door closing")
 
-    def open_then_stop(self):
-        self.open()
-        time.sleep(30)
-        self.stop()
-        self.state = "open"
-
-    def close_then_stop(self):
-        self.close()
-        time.sleep(30)
-        self.stop()
-        self.state = "closed"
-
-    def __del__(self):
+    def __del__(self) -> None:
         self.stop()
 
 if __name__ == "__main__":
