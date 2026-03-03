@@ -1,124 +1,1089 @@
-﻿# ============================================================================
-# CRITICAL: `door` must be imported BEFORE gevent monkey-patches `time.sleep`.
-# `door.py` captures the real OS sleep at import time via `_hw_sleep = time.sleep`
-# so that RPi.GPIO interrupt callbacks (which run in native C threads) use the
-# un-patched sleep.  Moving this import *after* monkey.patch_all() breaks
-# endstop detection on the Pi.
-# ============================================================================
-from door import DOOR  # noqa: E402 -- must be first
+#this needs to be at the top of the gevent because the threads somehow interfere - i dont know why but this is the solution for now
+from door import DOOR
 from gevent import monkey
-
 monkey.patch_all()
-
-# --- Standard library ---
-import logging
-import os
-import sys
-from functools import partial
-from threading import Thread
-
-# --- Flask / SocketIO ---
-from flask import Flask
+from flask import Flask, render_template, Response, send_file, request, jsonify
+from threading import Thread, Lock
+import threading
 from flask_socketio import SocketIO
-
-# --- Project ---
+from datetime import datetime, date, timedelta
 from protected_dict import protected_dict as global_vars
-from services.astro_service import AstroService
-from services.config_service import ConfigService
-from services.door_service import DoorService
-from services.notification_service import NotificationService
-from controllers.http_controller import get_all_data, init_http
-from controllers.socket_controller import init_socket_handlers
-from tasks.camera_task import camera_task_main
-from tasks.data_log_task import data_log_task_main, get_log_file_name
-from tasks.data_update_task import data_update_task_main
-from tasks.door_task import door_task_main
-from tasks.temperature_task import temperature_task_main
-from utils.logging_utils import configure_logging, log_buffer
+from astral import LocationInfo
+from astral.geocoder import database, LocationDatabase
+from astral.sun import sun
+from gpiozero import CPUTemperature
+import time
+import psutil
+import json
+import pytz
+import ruamel.yaml as YAML
+import os.path
+from collections import deque
+import logging
+import sys
+from camera import Camera
+import base64
+from pywebpush import webpush, WebPushException
+import atexit
 
 logger = logging.getLogger(__name__)
 
-ROOT_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-CONFIG_PATH = os.path.join(ROOT_PATH, "config.yaml")
-SECRETS_PATH = os.path.join(ROOT_PATH, ".secrets.yaml")
-SUBSCRIPTIONS_PATH = os.path.join(ROOT_PATH, ".subscriptions.json")
+if os.name != 'nt':
+    from gpiozero import CPUTemperature
+    import board
+    from dht22 import DHT22
+else:
+    logger.warning("Running on Windows, using mock classes.")
+    from MockDHT22 import MockDHT22
+    from mock_board import MockBoard
+    from mock_temperatur import MockCPUTemperature
+    CPUTemperature = MockCPUTemperature
+    DHT22 = MockDHT22
+    board = MockBoard()
+
+
+##################################
+# Flask configuration:
+##################################
+
 
 app = Flask(__name__, template_folder="templates")
-app.config["SECRET_KEY"] = "secret_key"
-socketio = SocketIO(app, async_mode="gevent")
+app.config['SECRET_KEY'] = 'secret_key'
+socketio = SocketIO(app, async_mode='gevent')
+
+log_buffer = deque(maxlen=100)
+camera = None
+##################################
+# Helper functions:
+##################################
+
+# Get system uptime in seconds
+uptime_seconds = psutil.boot_time()
+uptime_datetime = datetime.fromtimestamp(uptime_seconds)
+
+def get_uptime():
+    # Calculate the time difference between now and the uptime
+    uptime_delta = datetime.now() - uptime_datetime
+
+    # Extract days, hours, minutes, and seconds from the time difference
+    days = uptime_delta.days
+    hours, remainder = divmod(uptime_delta.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Return system uptime string
+    return f"{days} day(s), {hours} hour(s), {minutes} minute(s), {seconds} second(s)"
+
+# Define the location of Boulder, Colorado
+boulder = LocationInfo("Boulder", "USA", "America/Denver", 40.01499, -105.27055)
+timezone = pytz.timezone('America/Denver')
+
+def get_sunrise_and_sunset():
+    # Get the sunrise and sunset times for today
+    s = sun(boulder.observer, date=date.today(), tzinfo=boulder.timezone)
+
+    # Convert sunrise and sunset to the desired timezone (e.g., 'America/Denver')
+    return s["sunrise"].astimezone(timezone), s["sunset"].astimezone(timezone)
+
+def get_current_time():
+    return timezone.localize(datetime.now())
+
+root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+config_filename = os.path.join(root_path, "config.yaml")
+config_lock = Lock()
+
+def save_config():
+    with config_lock:
+        with open(config_filename, 'w') as file:
+            yaml = YAML.YAML()
+            to_dump = {
+                "auto_mode": global_vars.instance().get_value("auto_mode"),
+                "sunrise_offset": global_vars.instance().get_value("sunrise_offset"),
+                "sunset_offset": global_vars.instance().get_value("sunset_offset"),
+                "location": global_vars.instance().get_value("location"),
+                "consoleLogToFile": global_vars.instance().get_value("consoleLogToFile"),
+                "csvLog": global_vars.instance().get_value("csvLog"),
+                "enable_camera" : global_vars.instance().get_value("enable_camera"),
+                "camera_index" : global_vars.instance().get_value("camera_index")
+            }
+            yaml.dump(to_dump, file)
+
+def load_config():
+    saveNewConfig = False
+    with config_lock:
+        config_to_set = {
+            "auto_mode": "True",
+            "sunrise_offset": 0,
+            "sunset_offset": 0,
+            "location": {
+                "city": "Boulder",
+                "region": "USA",
+                "timezone": "America/Denver",
+                "latitude": 40.01499,
+                "longitude": -105.27055
+            },
+            "consoleLogToFile": False,
+            #will be used for currently not implemented stopping/starting of the logging thread
+            "csvLog": True,
+            "enable_camera" : False,
+            "camera_index" : 0
+            
+        }
+        if os.path.exists(config_filename):
+            with open(config_filename, 'r') as file:
+                yaml = YAML.YAML()
+                content = file.read()
+                yaml_config = yaml.load(content)
+                config_to_set.update(yaml_config)
+        else:
+            saveNewConfig = True
+
+        global_vars.instance().set_values(config_to_set)
+
+    if saveNewConfig:
+        logger.info("No configuration file found, creating a new one.")
+        save_config()
 
 
-def _build_services() -> tuple:
-    config_service = ConfigService(CONFIG_PATH, global_vars.instance())
-    astro_service = AstroService(global_vars.instance())
-    notification_service = NotificationService(global_vars.instance(), SUBSCRIPTIONS_PATH)
-    door_hardware = DOOR()
-    door_service = DoorService(door_hardware)
-    return config_service, astro_service, notification_service, door_service
+def get_valid_locations() -> list:
+    locations = []
+    location_database = database()
+    #logger.debug(type(location_database))
+
+    for location_name, location_info in location_database.items():
+        if isinstance(location_info, dict):
+            for sub_location_name, sub_location_info in location_info.items():
+                locations.append({
+                    "name": f"{location_name} - {sub_location_name}",
+                    "region": sub_location_info[0].region,
+                    "timezone": sub_location_info[0].timezone,
+                    "latitude": sub_location_info[0].latitude,
+                    "longitude": sub_location_info[0].longitude
+                })
+        locations.sort(key=lambda x: (x['name'], x['region']))
+    return locations
+
+def reload_location_data():
+    location = global_vars.instance().get_value("location")
+    global boulder, timezone
+
+    boulder = LocationInfo(
+        location["city"],
+        location["region"],
+        location["timezone"],
+        location["latitude"],
+        location["longitude"]
+    )
+    timezone = pytz.timezone(location["timezone"])
 
 
-if __name__ == "__main__":
-    # Bootstrap
+def get_all_data():
+    # Grab data safely from global store:
+    temp_in, hum_in, temp_out, hum_out, state, override, cpu_temp, \
+        sunrise, sunset, sunrise_offset, sunset_offset, \
+        temp_in_min, temp_in_max, hum_in_min, hum_in_max, \
+        temp_out_min, temp_out_max, hum_out_min, hum_out_max, \
+        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state, camera_enabled\
+        = global_vars.instance().get_values(["temp_in", "hum_in", \
+            "temp_out", "hum_out", "state", "override", "cpu_temp", \
+            "sunrise", "sunset", "sunrise_offset", "sunset_offset", \
+            "temp_in_min", "temp_in_max", "hum_in_min", "hum_in_max", \
+            "temp_out_min", "temp_out_max", "hum_out_min", "hum_out_max", \
+            "cpu_temp_min", "cpu_temp_max", \
+            "reference_door_endstops_ms", "auto_mode" , "error_state", "enable_camera"])
+
+    # Check if time until sunrise is positive
+    time_until_open_str = None
+    time_until_close_str = None
+
+    if auto_mode == "False":
+        time_until_open_str = "disabled"
+        time_until_close_str = "disabled"
+    elif sunrise is not None and sunset is not None:
+        # Assuming sunrise and sunset are datetime objects
+        current_time = get_current_time()
+        time_until_open = sunrise + timedelta(minutes=sunrise_offset) - current_time
+        time_until_close = sunset + timedelta(minutes=sunset_offset) - current_time
+
+        if time_until_open > timedelta(0):
+            time_until_open_str = (datetime.min + time_until_open).strftime("%H:%M:%S")
+        else:
+            time_until_open_str = "passed"
+
+        # Check if time until sunset is positive
+        if time_until_close > timedelta(0):
+            time_until_close_str = (datetime.min + time_until_close).strftime("%H:%M:%S")
+        else:
+            time_until_close_str = "passed"
+
+    def format_temp(temp, units="F"):
+        return ("%0.1f" % temp) + u'\N{DEGREE SIGN}' + units if temp is not None else ""
+
+    def format_hum(hum):
+        return "%0.1f%%" % hum if hum is not None else ""
+
+    # Return nicely formatted data in dictionary form:
+    data_dict = {
+      'time': datetime.now().strftime("%I:%M:%S.%f %p")[:-3],
+      'temp_in': format_temp(temp_in),
+      'temp_in_min': format_temp(temp_in_min),
+      'temp_in_max': format_temp(temp_in_max),
+      'hum_in': format_hum(hum_in),
+      'hum_in_min': format_hum(hum_in_min),
+      'hum_in_max': format_hum(hum_in_max),
+      'temp_out': format_temp(temp_out),
+      'temp_out_min': format_temp(temp_out_min),
+      'temp_out_max': format_temp(temp_out_max),
+      'hum_out': format_hum(hum_out),
+      'hum_out_min': format_hum(hum_out_min),
+      'hum_out_max': format_hum(hum_out_max),
+      'cpu_temp': format_temp(cpu_temp, units="C"),
+      'cpu_temp_min': format_temp(cpu_temp_min, units="C"),
+      'cpu_temp_max': format_temp(cpu_temp_max, units="C"),
+      'state': state if state is not None else "",
+      'override': state if state is not None and override else "off",
+      'uptime': str(get_uptime()),
+      'sunrise': sunrise.strftime("%I:%M:%S %p").lstrip('0') if sunrise is not None else "",
+      'sunset': sunset.strftime("%I:%M:%S %p").lstrip('0') if sunset is not None else "",
+      'tu_open': time_until_open_str if time_until_open_str is not None else "",
+      'tu_close': time_until_close_str if time_until_close_str is not None else "",
+      'reference_door_endstops_ms': str(reference_door_endstops_ms) if reference_door_endstops_ms is not None else "Not set",
+      'auto_mode': auto_mode,
+      'errorstate' : error_state,
+      'camera_enabled' : str(camera_enabled)
+    }
+    return data_dict
+
+##################################
+# Background tasks:
+##################################
+
+def temperature_task():
+    data_pin_out = board.D21
+    data_pin_in = board.D16
+    dht_out = DHT22(data_pin_out, power_pin=20)
+    dht_in = DHT22(data_pin_in, power_pin=26)
+    last_date = None
+
+    # Update value in global vars, and also store min and max seen since startup:
+    def update_val(val, name):
+        if val is not None:
+            # Get current vals
+            val_old, val_max, val_min = \
+                global_vars.instance().get_values([name, name + "_max", name + "_min"])
+
+            # Throw away any errant readings. Sometimes the readings are nonsensical
+            if val_old is not None:
+                if val > (val_old + 5.0) or val < (val_old - 5.0):
+                    val = val_old
+
+            # Update min and max
+            val_max = val_max if val_max is not None else -500
+            val_min = val_min if val_min is not None else 500
+            if val > val_max:
+                val_max = val
+            if val < val_min:
+                val_min = val
+
+            # Set new vals
+            global_vars.instance().set_values({name: val, name + "_max": val_max, name + "_min": val_min})
+
+    while True:
+        temp_out, hum_out = dht_out.get_temperature_and_humidity()
+        temp_in, hum_in = dht_in.get_temperature_and_humidity()
+
+        #if temp_out is not None and hum_out is not None:
+        #    logger.debug("Outside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_out, hum_out))
+        #if temp_in is not None and hum_in is not None:
+        #    logger.debug("Inside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_in, hum_in))
+
+        # If it is midnight then reset the mins and maxes so we get fresh values for the new day:
+        current_date = date.today()
+        if current_date != last_date:
+            global_vars.instance().set_values({ \
+                "temp_in_min": 500, "temp_in_max": -500, \
+                "temp_out_min": 500, "temp_out_max": -500, \
+                "hum_in_min": 500, "hum_in_max": -500, \
+                "hum_out_min": 500, "hum_out_max": -500, \
+                "cpu_temp_min": 500, "cpu_temp_max": -500 \
+            })
+            last_date = current_date
+
+        # Update the global variables for all the temperatures:
+        update_val(temp_in, "temp_in")
+        update_val(hum_in, "hum_in")
+        update_val(temp_out, "temp_out")
+        update_val(hum_out, "hum_out")
+
+        # Set CPU temperature:
+        cpu_temp = CPUTemperature().temperature
+        update_val(cpu_temp, "cpu_temp")
+
+        time.sleep(2.5)
+
+# Background thread for managing coop door in real-time.
+def door_task():
+    door = DOOR()
+    door_move_count = 0
+    DOOR_MOVE_MAX_AFTER_ENDSTOPS = 1
+    first_iter = True
+    sunrise = None
+    door_state = None
+    door_override = None
+    sunrise = None
+    sunset = None
+    sentErrorNotification = False
+    thread_sleep_time = 0.5
+    last_d_door_state = None
+
+    while True:
+        toogle_reference_of_endstops, clearErrorState = global_vars.instance().get_values(["toggle_reference_of_endstops", "clear_error_state"])
+    
+        generateError = global_vars.instance().get_value("debug_error")
+        if generateError:
+            door.ErrorState("Test Error")
+            global_vars.instance().set_value("debug_error", False)
+            
+        if clearErrorState:
+            door.clear_errorState()
+            global_vars.instance().set_value("clear_error_state", False)
+            sentErrorNotification = False
+        
+        if toogle_reference_of_endstops:
+            logger.info("Referencing door endstops, waiting for completion.")
+            global_vars.instance().set_value("toggle_reference_of_endstops", False)
+
+            if (door.reference_endstops() == False):
+                logger.critical("Referencing door endstops failed, please check the door and try again.")
+                continue
+            
+            global_vars.instance().set_value("reference_door_endstops_ms", door.reference_door_endstops_ms)
+            logger.info("Reference Sequence Successfull with total time: %s milliseconds", door.reference_door_endstops_ms)
+        else:
+            # Get state and desired state:
+            door_state = door.get_state()
+            door_override = door.get_override()
+            d_door_state, auto_mode, reference_door_endstops_ms = \
+                global_vars.instance().get_values(["desired_door_state", "auto_mode","reference_door_endstops_ms"])
+
+            auto_mode = auto_mode == "True"
+            door.set_auto_mode(auto_mode)
+
+            if d_door_state != last_d_door_state:
+                door_move_count = 0
+                last_d_door_state = d_door_state
+
+            #logger.debug("Reference door Endstop in MS: " + str(reference_door_endstops_ms))
+            # If we are in auto mode then open or close the door based on sunrise
+            # or sunset times.
+            if auto_mode and not door_override:
+                if reference_door_endstops_ms is None:
+                    logger.warning("Reference door endstops not set. Please run the reference door endstops sequence from the WebUI - disabling auto mode.")
+                    global_vars.instance().set_value("auto_mode", "False")
+                else:
+                    # Get the current sunrise and sunset time, time of close, time of open, and current time.
+                    sunrise, sunset = get_sunrise_and_sunset()
+                    sunrise_offset, sunset_offset = global_vars.instance().get_values(["sunrise_offset", "sunset_offset"])
+                    open_time = sunrise + timedelta(minutes=sunrise_offset)
+                    close_time = sunset + timedelta(minutes=sunset_offset)
+                    current_time = get_current_time()
+                    time_window = timedelta(minutes=1)
+
+                    # If we just booted up, then we need to make sure the door is in the
+                    # correct position. This prevents the door from being stuck in the wrong
+                    # position due to an unfortunately timed power outage.
+                    if first_iter:
+                        if current_time >= open_time and current_time < close_time:
+                            global_vars.instance().set_value("desired_door_state", "open")
+                        else:
+                            global_vars.instance().set_value("desired_door_state", "closed")
+
+                    # If we are in the 1 minute after sunrise, command the desired door
+                    # state to open.
+                    if current_time >= open_time and current_time <= open_time + time_window:
+                        global_vars.instance().set_value("desired_door_state", "open")
+
+                    # If we are in the 1 minute after sunset, command the desired door
+                    # state to closed.
+                    if current_time >= close_time and current_time <= close_time + time_window:
+                        global_vars.instance().set_value("desired_door_state", "closed")
+                
+
+            # Poll endstops every iteration as a reliable safety-net.
+            # Edge-detect callbacks can be missed (bounce, gevent blocking,
+            # etc.), so this direct GPIO read guarantees the motor stops
+            # within one iteration (~0.5 s) of reaching an endstop.
+            if door.check_endstops():
+                # An endstop was just triggered — re-read the door state
+                # so the rest of this iteration uses the updated value.
+                door_state = door.get_state()
+
+            # If we are in override mode, then the door is being moved by the switch.
+            if door_override:
+                # See if switch is turned off, if so, stop the door.
+                door.check_if_switch_neutral()
+
+                # Set the desired state to the door's actual position so
+                # we don't create a state mismatch when override ends (Fix #3)
+                global_vars.instance().set_value("desired_door_state", door.get_state())
+
+            # If the door state does not match the desired door state, then
+            # we need to move the door.
+
+            
+            elif door_state != d_door_state:
+                if (door.ErrorState()):
+                    door.stop()
+                    door_move_count = 0
+                    if (sentErrorNotification == False):
+                        send_push_notification("Door Error", "The door is in an error state, please check the door.")
+                        sentErrorNotification = True
+                else:
+                    endstopTimeout = door.reference_door_endstops_ms
+                    if (door.reference_door_endstops_ms is not None and (isinstance(endstopTimeout, int) or isinstance(endstopTimeout, float))):
+                        endstopTimeout = door.reference_door_endstops_ms * 0.001
+                    if endstopTimeout is None:
+                        endstopTimeout = 10
+                        logger.debug(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
+                    match d_door_state:
+                        case "stopped":
+                            if door_state in ["open", "closed"]:
+                                logger.debug("stop: door already at endstop (%s), reconciling desired state", door_state)
+                                door.stop(door_state)
+                                global_vars.instance().set_value("desired_door_state", door_state)
+                                door_move_count = 0
+                            else:
+                                logger.debug("stop because door is in moving state")
+                                door.stop()
+                                logger.debug("SHOULD NOW BE STOPPED - door state: %s", door.get_state())
+                                door_move_count = 0
+                        case "open":
+                            if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
+                                logger.debug(f"OPEN: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                door.open()
+                                door_move_count += thread_sleep_time
+                            else:
+                                door.ErrorState("Endstop not reached")
+                                global_vars.instance().set_value("desired_door_state", "stopped")
+                                door_move_count = 0
+                        case "closed":
+                            if door_move_count <= endstopTimeout + DOOR_MOVE_MAX_AFTER_ENDSTOPS:
+                                logger.debug(f"CLOSE: current moveCount: {door_move_count} and endstopTimeout {endstopTimeout} + DOORMOVEMAX {DOOR_MOVE_MAX_AFTER_ENDSTOPS}")
+                                door.close()
+                                door_move_count += thread_sleep_time
+                            else:
+                                door.ErrorState("Endstop not reached")
+                                global_vars.instance().set_value("desired_door_state", "stopped")
+                                door_move_count = 0
+                        case _:
+                            door.ErrorState("unknown state - i dont know how this could happen")
+                            door_move_count = 0
+                            assert False, "Unknown state: " + str(d_door_state)
+
+            # We are not in switch override, and the door is in the desired state. The door should be
+            # stopped. We can do this most robustly by also checking the switch, which will stop the door
+            # as long as it is in the nuetral position. This helps us catch a switch close or open that
+            # sometimes gets missed by the edge detection.
+            else:
+                # Check if switch off, if so, stop the door.
+                door.check_if_switch_neutral(nuetral_state=door.get_state())
+                door_move_count = 0
+
+            # Set global state
+            first_iter = False
+            door_state = door.get_state()
+            door_override = door.get_override()
+            
+            global_vars.instance().set_values({ \
+                "state": door_state, \
+                "override": door_override, \
+                "sunrise": sunrise, \
+                "sunset": sunset, \
+                "error_state": door.errorState if door.ErrorState() else "" \
+            })
+
+            time.sleep(thread_sleep_time)
+
+def data_update_task():
+    lastRefreshTime = datetime.now()
+    while True:
+        #logger.debug("Time since last refresh: " + str((datetime.now() - lastRefreshTime).total_seconds() * 1000) + "ms")
+        lastRefreshTime = datetime.now()
+        try:
+            to_send = get_all_data()
+            # logger.debug(f"Sending data: {to_send}")
+            socketio.emit('data', to_send, namespace='/')
+        except Exception as e:
+            logger.error(f"Error in data update task: {e}")
+        time.sleep(1.0)
+
+# Form log file name in form log/YY_MM_DD.csv
+def get_log_file_name():
+    current_date = datetime.now()
+    formatted_date = current_date.strftime("%Y_%m_%d")
+    return os.path.join(os.path.join(root_path, "log"), formatted_date + ".csv")
+
+def data_log_task():
+    
+    # Make log directory:
+    log_dir = os.path.dirname(get_log_file_name())
+    os.makedirs(log_dir, exist_ok=True)
+
+    #check if the todaysLogFile is there already and if so remove it
+    todaysLog = get_log_file_name()
+    if os.path.exists(todaysLog):
+        os.remove(todaysLog)
+
+    last_log_file_name = ""
+    while True:
+        data = get_all_data()
+
+        # Open new log file and write CSV header if it is a new day
+        log_file_name = get_log_file_name()
+        if log_file_name != last_log_file_name:
+            with open(log_file_name, 'a') as file:
+                header = "# " + ", ".join(data.keys()) + "\n"
+                file.write(header)
+
+        # Append data to file:
+        with open(log_file_name, 'a') as file:
+            row = ", ".join(data.values()) + "\n"
+            file.write(row)
+
+        # Sleep a bit:
+        last_log_file_name = log_file_name
+        time.sleep(5.0)
+
+def camera_task():
+    if (global_vars.instance().get_value("enable_camera") == False):
+        logger.info("Camera is disabled by configuration")
+        return
+    
+    cameraIndex = global_vars.instance().get_value("camera_index")
+    logger.debug(f"Starting camera task with camera index: {cameraIndex}")
+    camera = Camera(device_index=cameraIndex)
+
+    while True:
+        try:
+            frame = camera.get_frame()
+            encoded_frame = base64.b64encode(frame).decode('utf-8')
+            socketio.emit('camera', encoded_frame, namespace='/')
+        except RuntimeError as e:
+            logger.critical(f"Error: {e}")
+            logger.critical("Camera task will end now.")
+            break
+        time.sleep(0.1)
+
+##################################
+# Websocket handlers:
+##################################
+
+@socketio.on('connect')
+def handle_connect():
+    for log_entry in log_buffer:
+        socketio.emit('log', {'message': log_entry}, namespace='/')
+    # socketio.start_background_task(target=data_update_task)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    pass
+    #logger.debug('Client disconnected')
+
+@socketio.on('open')
+def handle_open():
+    logger.debug('Open button pressed which disables auto mode')
+    global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("desired_door_state", "open")
+
+@socketio.on('close')
+def handle_close():
+    logger.debug('Close button pressed which disables auto mode')
+    
+    global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("desired_door_state", "closed")
+
+@socketio.on('stop')
+def handle_stop():
+    logger.debug('Stop button pressed which disables auto mode')
+    global_vars.instance().set_value("auto_mode", "False")
     global_vars.instance().set_value("desired_door_state", "stopped")
 
-    config_service, astro_service, notification_service, door_service = _build_services()
+@socketio.on('toggle')
+def handle_toggle(message):
+    logger.debug('Toggle button pressed')
+    toggle_value = message['toggle']
+    logger.debug(f'Toggle button pressed: {toggle_value}')
+    if toggle_value:
+        logger.info('Auto Mode Enabled')
+        global_vars.instance().set_value("auto_mode", "True")
+    else:
+        logger.info('Auto Mode Disabled')
+        global_vars.instance().set_value("auto_mode", "False")
 
-    config_service.load()
-    configure_logging(socketio)
-    logger.info("Starting Coop Controller")
+    logger.debug(f"current auto mode: {global_vars.instance().get_value('auto_mode')}")
+    save_config()
 
-    notification_service.load_keys(SECRETS_PATH)
-    astro_service.reload_location()
+@socketio.on('auto_offsets')
+def handle_input_numbers(data):
+    sunrise_offset = data['sunrise_offset']
+    sunset_offset = data['sunset_offset']
+    global_vars.instance().set_values({"sunrise_offset": int(sunrise_offset), "sunset_offset": int(sunset_offset)})
+    save_config()
 
-    # Register controllers
-    init_http(app, config_service, astro_service, socketio)
-    init_socket_handlers(
-        socketio,
-        config_service,
-        astro_service,
-        notification_service,
-        log_buffer,
-        get_log_file_fn=partial(get_log_file_name, ROOT_PATH),
+@socketio.on('update_location')
+def handle_update_location(location_data):
+    # Extract location data from the received message
+    city = location_data.get("city")
+    region = location_data.get("region")
+    timezone = location_data.get("timezone")
+    latitude = location_data.get("latitude")
+    longitude = location_data.get("longitude")
+
+    # Update global location variables
+    new_location = {
+        "city": city,
+        "region": region,
+        "timezone": timezone,
+        "latitude": latitude,
+        "longitude": longitude
+    }
+    global_vars.instance().set_value("location", new_location)
+
+    # Save the updated location to the YAML configuration file
+    save_config()
+
+    # Reload the sunrise and sunset calculation based on new location
+    reload_location_data()
+
+    logger.info(f"Location updated to: {new_location}")
+
+@socketio.on('reference_endstops')
+def handle_reference_endstops():
+    logger.debug('Referencing endstops Socket Command')
+    global_vars.instance().set_value("toggle_reference_of_endstops", True)
+
+@socketio.on('clear_error')
+def handle_clear_error():
+    logger.info('Clearing error state')
+    global_vars.instance().set_value("clear_error_state", True)
+
+@socketio.on('generate_error')
+def handle_generate_error():
+    logger.debug('Generating error state')
+    global_vars.instance().set_value("debug_error", True)
+
+@socketio.on('get_csv_data')
+def handle_get_csv_data():
+    logger.debug('Getting CSV data')
+    csv_data = []
+    log_file_name = get_log_file_name()
+    if os.path.exists(log_file_name):
+        with open(log_file_name, 'r') as file:
+            csv_data = file.readlines()
+        socketio.emit('csv_data', csv_data, namespace='/')   
+
+##################################
+# Static page handlers:
+##################################
+
+@app.route('/debug')
+def debug_panel():
+    return render_template('debug.html', is_windows=(os.name == 'nt'))
+
+@app.route('/mock')
+def mock_panel():
+    if os.name != 'nt':
+        return "Mock panel is only available on Windows.", 403
+    return render_template('mock.html')
+
+@socketio.on('mock_trigger_pin')
+def handle_mock_trigger_pin(data):
+    if os.name == 'nt':
+        from mock_gpio import GPIO
+        pin = data['pin']
+        state = GPIO.HIGH if data['state'] == 'HIGH' else GPIO.LOW
+        GPIO.trigger_event(pin, state)
+
+@socketio.on('get_debug_data')
+def handle_get_debug_data():
+    import door as door_module
+    # Pin metadata
+    pin_meta = {
+        17: {"name": "in1", "purpose": "Motor UP", "direction": "OUT"},
+        27: {"name": "in2", "purpose": "Motor DOWN", "direction": "OUT"},
+        22: {"name": "ena", "purpose": "Motor Enable", "direction": "OUT"},
+        23: {"name": "end_up", "purpose": "Endstop UP", "direction": "IN"},
+        24: {"name": "end_down", "purpose": "Endstop DOWN", "direction": "IN"},
+        5:  {"name": "o_pin", "purpose": "Manual Open Switch", "direction": "IN"},
+        6:  {"name": "c_pin", "purpose": "Manual Close Switch", "direction": "IN"},
+        21: {"name": "data_pin_out", "purpose": "DHT22 Outdoor Data", "direction": "IN"},
+        16: {"name": "data_pin_in", "purpose": "DHT22 Indoor Data", "direction": "IN"},
+        20: {"name": "power_pin_out", "purpose": "DHT22 Outdoor Power", "direction": "OUT"},
+        26: {"name": "power_pin_in", "purpose": "DHT22 Indoor Power", "direction": "OUT"},
+    }
+
+    # Get GPIO pin states
+    pins_data = []
+    if os.name == 'nt':
+        from mock_gpio import GPIO as MockGPIORef
+        all_pins = MockGPIORef.get_all_pins()
+        for pin_num, meta in sorted(pin_meta.items()):
+            pin_info = all_pins.get(pin_num, {})
+            pins_data.append({
+                "pin": pin_num,
+                "name": meta["name"],
+                "purpose": meta["purpose"],
+                "direction": meta["direction"],
+                "state": pin_info.get("state", "N/A"),
+                "mode": pin_info.get("mode", "N/A")
+            })
+    else:
+        import RPi.GPIO as RealGPIO
+        for pin_num, meta in sorted(pin_meta.items()):
+            try:
+                state = "HIGH" if RealGPIO.input(pin_num) else "LOW"
+            except Exception:
+                state = "N/A"
+            pins_data.append({
+                "pin": pin_num,
+                "name": meta["name"],
+                "purpose": meta["purpose"],
+                "direction": meta["direction"],
+                "state": state,
+                "mode": meta["direction"]
+            })
+
+    # Door module constants
+    door_constants = {
+        "referenceSequenceTimeout": door_module.referenceSequenceTimeout,
+        "invert_end_up": door_module.invert_end_up,
+        "invert_end_down": door_module.invert_end_down,
+    }
+
+    # All global variables (mask secrets)
+    secrets_keys = {"vapid_private_key", "vapid_public_key"}
+    all_globals = {}
+    raw_globals = global_vars.instance().get_all()
+    for k, v in raw_globals.items():
+        if k in secrets_keys:
+            all_globals[k] = "***" if v else None
+        elif isinstance(v, datetime):
+            all_globals[k] = v.strftime("%Y-%m-%d %H:%M:%S %Z")
+        elif isinstance(v, date):
+            all_globals[k] = v.strftime("%Y-%m-%d")
+        else:
+            all_globals[k] = v
+
+    # System info
+    cpu_percent = psutil.cpu_percent(interval=0)
+    mem = psutil.virtual_memory()
+    system_info = {
+        "os_name": os.name,
+        "platform": sys.platform,
+        "python_version": sys.version,
+        "uptime": str(get_uptime()),
+        "cpu_percent": cpu_percent,
+        "memory_total_mb": round(mem.total / (1024 * 1024), 1),
+        "memory_used_mb": round(mem.used / (1024 * 1024), 1),
+        "memory_percent": mem.percent,
+    }
+
+    # Thread info
+    threads_data = []
+    for t in threading.enumerate():
+        threads_data.append({
+            "name": t.name,
+            "daemon": t.daemon,
+            "alive": t.is_alive()
+        })
+
+    # Recent log entries
+    recent_logs = list(log_buffer)
+
+    debug_payload = {
+        "pins": pins_data,
+        "door_constants": door_constants,
+        "global_vars": all_globals,
+        "system": system_info,
+        "threads": threads_data,
+        "logs": recent_logs,
+        "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    }
+    socketio.emit('debug_data', debug_payload, namespace='/')
+
+@socketio.on('mock_get_outputs')
+def handle_mock_get_outputs():
+    if os.name == 'nt':
+        from mock_gpio import GPIO
+        pins = GPIO.get_all_pins()
+        outputs = {
+            17: pins.get(17, {}).get('state', 'LOW'),
+            27: pins.get(27, {}).get('state', 'LOW'),
+            22: pins.get(22, {}).get('state', 'LOW')
+        }
+        socketio.emit('mock_update_outputs', outputs, namespace='/')
+
+# Route for the home page
+@app.route('/')
+def index():
+    # Render the template with temperature and humidity values
+    return render_template(
+        'index_optimized_door.html',
+        auto_mode=global_vars.instance().get_value("auto_mode"),
+        sunrise_offset=global_vars.instance().get_value("sunrise_offset"),
+        sunset_offset=global_vars.instance().get_value("sunset_offset"),
+        location=global_vars.instance().get_value("location"),
+        valid_locations=get_valid_locations(),
+        reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms"),
+        vapid_public_key = global_vars.instance().get_value("vapid_public_key"),
+        is_windows = os.name == 'nt'
     )
 
-    # Start background threads
-    Thread(
-        target=door_task_main,
-        args=(door_service, notification_service, astro_service),
-        daemon=True,
-        name="door_task",
-    ).start()
+@app.template_filter('is_number')
+def is_number(value):
+    try:
+        float(value)
+        return True
+    except Exception:
+        return False
+    
+@app.route('/manifest.json')
+def serve_manifest():
+    return send_file('manifest.json', mimetype='application/manifest+json')
 
-    Thread(
-        target=temperature_task_main,
-        daemon=True,
-        name="temperature_task",
-    ).start()
+@app.route('/sw.js')
+def serve_sw():
+    return send_file('sw.js', mimetype='application/javascript')
 
-    Thread(
-        target=data_update_task_main,
-        args=(socketio, get_all_data),
-        daemon=True,
-        name="data_update_task",
-    ).start()
+@app.route('/subscribe', methods=['POST'])
+def subscribe():
+    subscription = request.json
+    logger.debug('Received subscription:', subscription)
+    currentJsonContent = None
+    if os.path.exists(".subscriptions.json"):
+        currentJsonContent = json.loads(open(".subscriptions.json").read())
 
-    if global_vars.instance().get_value("csvLog"):
-        Thread(
-            target=data_log_task_main,
-            args=(ROOT_PATH, get_all_data),
-            daemon=True,
-            name="data_log_task",
-        ).start()
+    if currentJsonContent is None:
+        currentJsonContent = {"subscriptions": []}
 
-    Thread(
-        target=camera_task_main,
-        args=(socketio,),
-        daemon=True,
-        name="camera_task",
-    ).start()
+    currentJsonContent["subscriptions"].append(subscription)
 
-    # Run Flask
-    host = "0.0.0.0"
+    # Save subscription to database (not shown)
+    with open('.subscriptions.json', 'w') as f:
+        json.dump(currentJsonContent, f)
+
+    return jsonify({'message': 'Subscription successful!'})
+
+@app.route('/update', methods=['POST'])
+def update_app():
+    import subprocess
+    import sys
+    import os
+    import time
+    from threading import Thread
+    
+    logger.info("Update requested. Starting update script...")
+    
+    update_script_path = os.path.join(os.path.dirname(__file__), 'update_script.py')
+    app_path = os.path.abspath(__file__)
+    
+    pid = str(os.getpid())
+    if os.name == 'nt':
+        subprocess.Popen([sys.executable, update_script_path, app_path, pid], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen([sys.executable, update_script_path, app_path, pid], preexec_fn=os.setpgrp)
+    
+    def shutdown():
+        time.sleep(1)
+        logger.info("Shutting down for update...")
+        os._exit(0)
+    
+    Thread(target=shutdown).start()
+    
+    response = jsonify({"status": "updating"})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
+    
+app.jinja_env.filters['is_number'] = is_number
+##################################
+# Startup:
+##################################
+
+#logger for the webUi Log
+class SocketIOHandler(logging.Handler):
+    def emit(self, record):
+        log_entry = self.format(record)
+        log_buffer.append(log_entry)
+        socketio.emit('log', {'message': log_entry}, namespace='/')  # Emit new log to clients
+
+def exitHandler(stdout,stderr):
+    sys.stdout = stdout
+    sys.stderr = stderr
+    logger.info("Exiting Coop Controller")
+
+def configure_logging():
+    """Configure the logging system."""
+    logging.basicConfig(level=logging.DEBUG) 
+    # Define the log format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Get the root logger
+    rootLogger = logging.getLogger()
+    rootLogger.setLevel(logging.DEBUG)
+
+    # Add SocketIO logging handler
+    socketio_handler = SocketIOHandler()  # Assume this handler is already defined
+    socketio_handler.setFormatter(formatter)
+    if not any(isinstance(h, SocketIOHandler) for h in rootLogger.handlers):
+        rootLogger.addHandler(socketio_handler)
+
+    # Add StreamHandler to print logs to the console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)  # Explicitly set the same formatter
+    if not any(isinstance(h, logging.StreamHandler) for h in rootLogger.handlers):
+        rootLogger.addHandler(console_handler)
+
+    if global_vars.instance().get_value("consoleLogToFile"):
+        file_handler = logging.FileHandler("log.txt", mode='w')
+        file_handler.setFormatter(formatter)
+        if not any(isinstance(h, logging.FileHandler) for h in rootLogger.handlers):
+            rootLogger.addHandler(file_handler)
+
+    # Set the log level for the geventwebsocket handler because it is too verbose
+    logger = logging.getLogger("geventwebsocket.handler")
+    logger.setLevel(logging.WARNING)
+
+    return rootLogger
+
+
+vapid_private_key = None
+def send_push_notification(title : str, body : str):
+    jsonContent = None
+    toRemove = []
+    payload = {"title": title, "body": body}
+    try:
+        logger.debug("Sending push notification with payload: " + str(payload))
+        global vapid_private_key
+        if vapid_private_key is None:
+            vapid_private_key = global_vars.instance().get_value("vapid_private_key")
+            if vapid_private_key is None:
+                logger.critical("Vapid private key not set, can't send push notification")
+                return
+
+        # Load subscription info from file
+        if not os.path.exists(".subscriptions.json"):
+            logger.critical("No subscriptions file found, can't send push notification")
+            return
+
+        jsonContent = json.loads(open(".subscriptions.json").read())
+        vapid_claims = {"sub": "mailto:your-email@example.com"}
+
+        for subscription in jsonContent.get("subscriptions", []):
+            valid = send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
+            if not valid:
+                toRemove.append(subscription)
+    except Exception as e:
+        logger.error(f"Error in send_push_notification: {e}")
+    
+    for remove in toRemove:
+        jsonContent["subscriptions"].remove(remove)
+
+    try:
+        with open('.subscriptions.json', 'w') as f:
+            json.dump(jsonContent, f)
+    except Exception as e:
+        logger.debug(f"Error in removing invalid subscriptions from file: {e}")
+    
+
+
+def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims) -> bool:
+    try:
+        webpush(
+            subscription_info,
+            data=json.dumps(payload),
+            vapid_private_key=vapid_private_key,
+            vapid_claims=vapid_claims,
+            timeout=10
+        )
+    except WebPushException as ex:
+        #TODO remove subscription if it is not valid anymore
+        logger.debug(f"WebPushException occurred: {ex}")
+        responseCode = getattr(ex, 'response', None)
+        
+        if responseCode is not None:
+            if responseCode.status_code == 410:
+                logger.debug("Subscription is no longer valid, removing it.")
+                return False
+        else:
+            logger.debug(f"Response: {responseCode}")
+            logger.debug(f"Status: {getattr(ex, 'status_code', None)}")
+    except Exception as ex:
+        logger.error(f"General Exception occurred while sending push notification: {ex}")#
+    return True
+
+
+def load_notification_keys():
+    secrets_filename = os.path.join(root_path, ".secrets.yaml")
+    if os.path.exists(secrets_filename):
+        with open(secrets_filename, 'r') as file:
+            yaml = YAML.YAML()
+            content = file.read()
+            yaml_config = yaml.load(content)
+            global_vars.instance().set_values(yaml_config["secrets"])
+    else:
+        logger.critical("No secrets file found - the system will missbehave without it.")
+
+if __name__ == '__main__':
+    
+    # Initialize the desired door state:
+    global_vars.instance().set_value("desired_door_state", "stopped")
+    
+    # Load global configuration file into memory
+    load_config()
+
+    configure_logging()
+    logger.info("Starting Coop Controller")
+
+    get_valid_locations()
+
+    load_notification_keys()
+
+
+
+    # Reload location data for sunrise/sunset calculations
+    reload_location_data()
+
+    # Start the task that manages the door:
+    door_thread = Thread(target=door_task)
+    door_thread.daemon = True
+    door_thread.start()
+
+    # Start the task that grabs temperature data:
+    temp_thread = Thread(target=temperature_task)
+    temp_thread.daemon = True
+    temp_thread.start()
+
+    # Start the task that logs data to CSV files:
+    if (global_vars.instance().get_value("csvLog") == True):
+        log_thread = Thread(target=data_log_task)
+        log_thread.daemon = True
+        log_thread.start()
+
+    #start a broadcast thread for the data
+    data_thread = Thread(target=data_update_task)
+    data_thread.daemon = True
+    data_thread.start()
+
+    # Start the camera task
+    camera_thread = Thread(target=camera_task)
+    camera_thread.daemon = True
+    camera_thread.start()
+
+    # Define the host and port
+    host = '0.0.0.0'
     port = 5000
-    logger.info("Flask app starting on %s:%s", host, port)
+
+    # Print the IP address and port to the console
+    logger.info(f"Starting Flask app on {host}:{port}")
+
+    # Start the Flask app
     socketio.run(app, debug=False, host=host, port=port)
