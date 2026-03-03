@@ -366,7 +366,11 @@ class DOOR():
         self.state = "closed"
 
     def __del__(self):
-        self.stop()
+        try:
+            self.stop()
+        except Exception:
+            # GPIO pins may already be torn down (e.g. during test cleanup).
+            pass
 
 if __name__ == "__main__":
     door = DOOR()

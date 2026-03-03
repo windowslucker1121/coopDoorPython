@@ -1,0 +1,590 @@
+"""Integration tests for the coop-door control logic.
+
+Tests exercise :class:`~door_task_runner.DoorTaskRunner` (the extracted loop
+body of ``door_task``) together with :class:`~door.DOOR` and
+:class:`~mock_gpio.MockGPIO` without starting Flask, Socket.IO, or any real
+hardware.
+
+Test scenarios
+--------------
+Reference sequence
+  1. Success path — measures travel time and stores it in global state.
+  2. Lower-endstop timeout — runner returns False; error state is set.
+  3. Upper-endstop timeout — runner returns False; error state is set.
+
+Premature lower-endstop detection (auto-close safety)
+  4. First premature trigger — motor stops, retry scheduled within 5 s.
+  5. Retry fires after cooldown — close command re-issued.
+  6. Two consecutive premature triggers — counter reaches 2, no error yet.
+  7. Three consecutive premature triggers — error state + push notification.
+  8. Valid (full-travel) close — premature counter reset to 0.
+  9. Manual mode — no premature detection even with fast endstop.
+ 10. Auto mode disabled mid-cycle — retry state fully cleared.
+
+Error state management
+ 11. ``clear_error_state`` flag clears door error and retry counters.
+ 12. Error-state drive block sends exactly one push notification.
+
+Basic door movement
+ 13. desired_door_state="open" → door starts opening.
+ 14. Upper endstop fires → door transitions to "open".
+ 15. desired_door_state="closed" → door starts closing.
+ 16. Lower endstop fires → door transitions to "closed".
+ 17. Move budget exhausted without reaching endstop → error state.
+"""
+
+import sys
+import os
+import time
+import threading
+from datetime import datetime, timedelta
+
+import pytz
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import mock_gpio
+from mock_gpio import MockGPIO
+from protected_dict import protected_dict as global_vars
+from door import DOOR, end_up, end_down
+from door_task_runner import DoorTaskRunner
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_TZ = pytz.timezone("America/Denver")
+#: Reference travel time used by all premature-endstop tests (ms).
+REF_MS: float = 10_000.0  # 10 seconds
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now() -> datetime:
+    return datetime.now(_TZ)
+
+
+def _make_runner(
+    door: DOOR,
+    *,
+    notifications: list | None = None,
+    # Place "current time" before sunrise so auto mode always wants closed.
+    sunrise_h: float = 1.0,   # sunrise  N hours from now (future)
+    sunset_h: float = 8.0,    # sunset   N hours from now (future)
+    now_override: datetime | None = None,
+) -> DoorTaskRunner:
+    """Create a DoorTaskRunner with deterministic, injected callables.
+
+    Default time positions (sunrise in +1 h, sunset in +8 h) keep the
+    runner in "night-before-dawn" so the first-iteration auto-mode logic
+    always commands the door *closed* — ideal for premature-endstop tests.
+    """
+    if notifications is None:
+        notifications = []
+
+    now = now_override if now_override is not None else _now()
+    sunrise = now + timedelta(hours=sunrise_h)
+    sunset  = now + timedelta(hours=sunset_h)
+
+    return DoorTaskRunner(
+        door=door,
+        get_sunrise_sunset=lambda: (sunrise, sunset),
+        get_current_time=lambda: now,
+        send_notification=lambda title, body: notifications.append((title, body)),
+    )
+
+
+def _init_gv(
+    *,
+    auto_mode: str = "False",
+    desired_door_state: str = "stopped",
+    reference_door_endstops_ms=REF_MS,
+    toggle_reference: bool = False,
+    clear_error: bool = False,
+    debug_error: bool = False,
+    sunrise_offset: int = 0,
+    sunset_offset: int = 0,
+) -> None:
+    """Populate global_vars with sensible defaults for a test."""
+    global_vars.instance().set_values(
+        {
+            "auto_mode": auto_mode,
+            "desired_door_state": desired_door_state,
+            "reference_door_endstops_ms": reference_door_endstops_ms,
+            "toggle_reference_of_endstops": toggle_reference,
+            "clear_error_state": clear_error,
+            "debug_error": debug_error,
+            "sunrise_offset": sunrise_offset,
+            "sunset_offset": sunset_offset,
+        }
+    )
+
+
+# ── GPIO helpers ────────────────────────────────────────────────────────────
+
+def _trigger_lower() -> None:
+    """Simulate lower (closed) endstop pressed — fires callback + sets pin HIGH."""
+    MockGPIO.trigger_event(end_down, MockGPIO.HIGH)
+
+
+def _trigger_upper() -> None:
+    """Simulate upper (open) endstop pressed — fires callback + sets pin HIGH."""
+    MockGPIO.trigger_event(end_up, MockGPIO.HIGH)
+
+
+def _release_lower() -> None:
+    """Deactivate lower endstop (pin back to LOW)."""
+    mock_gpio.globalPins[end_down]["state"] = MockGPIO.LOW
+
+
+def _release_upper() -> None:
+    """Deactivate upper endstop (pin back to LOW)."""
+    mock_gpio.globalPins[end_up]["state"] = MockGPIO.LOW
+
+
+# ── Premature-cycle helper ───────────────────────────────────────────────────
+
+def _run_premature_cycle(runner: DoorTaskRunner, door: DOOR) -> None:
+    """Execute one complete premature lower-endstop trigger cycle.
+
+    Steps
+    -----
+    1. If the door is not already *closing*, issue a close command and step
+       the runner once so ``door.close()`` is called.
+    2. Backdate ``door.startedMovingTime`` to 1 s ago (<<80 % of 10 s ref).
+    3. Trigger the lower endstop; the GPIO callback fires and sets
+       ``door.state = "closed"``.
+    4. Release the lower endstop pin (sets it back to LOW) so that the
+       subsequent ``check_if_switch_neutral`` inside ``runner.step()``
+       does not see an active endstop and override the "stopped" result.
+    5. Call ``runner.step()`` — this is the iteration that detects
+       the premature trigger and increments the counter (or trips the error).
+    """
+    if door.get_state() != "closing":
+        global_vars.instance().set_value("desired_door_state", "closed")
+        runner.step()
+        assert door.get_state() == "closing", (
+            f"Expected door to be 'closing' after issuing close command, "
+            f"got {door.get_state()!r}"
+        )
+
+    # Simulate only 1 second of travel (reference = 10 s → 1 s < 80 %)
+    door.startedMovingTime = time.time() - 1.0
+
+    # Trigger endstop — callback fires synchronously in MockGPIO
+    _trigger_lower()
+    assert door.get_state() == "closed", (
+        f"Expected door to be 'closed' after endstop trigger, "
+        f"got {door.get_state()!r}"
+    )
+
+    # Release pin so check_if_switch_neutral won't fight the "stopped" state
+    _release_lower()
+
+    # This step detects the premature trigger
+    runner.step()
+
+
+# ---------------------------------------------------------------------------
+# Test: Reference sequence
+# ---------------------------------------------------------------------------
+
+class TestReferenceSequence:
+
+    def test_success(self):
+        """Full reference: lower then upper endstop → travel time recorded."""
+        _init_gv(toggle_reference=True, reference_door_endstops_ms=None)
+        door = DOOR()
+        runner = _make_runner(door)
+
+        result: dict = {}
+
+        def _run() -> None:
+            result["returned"] = runner.step()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
+        # Give runner time to enter the close-polling loop
+        time.sleep(0.25)
+        _trigger_lower()    # door reaches closed position
+
+        time.sleep(0.25)
+        _trigger_upper()    # door reaches open position
+
+        t.join(timeout=5)
+        assert not t.is_alive(), "step() blocked for > 5 s"
+
+        assert result["returned"] is True
+
+        # Travel time stored on DOOR and forwarded to global_vars
+        assert door.reference_door_endstops_ms is not None
+        assert door.reference_door_endstops_ms > 0
+        assert global_vars.instance().get_value("reference_door_endstops_ms") == pytest.approx(
+            door.reference_door_endstops_ms
+        )
+
+        assert door.get_state() == "open"
+        # was_door_closing reset so next step can't misfire premature check
+        assert runner.was_door_closing is False
+
+        # toggle flag cleared even on success
+        assert global_vars.instance().get_value("toggle_reference_of_endstops") is False
+
+    def test_lower_endstop_timeout_sets_error(self):
+        """Reference aborts with error when lower endstop is never reached."""
+        import door as door_mod
+        saved = door_mod.referenceSequenceTimeout
+        door_mod.referenceSequenceTimeout = 0.3   # force a quick timeout
+
+        try:
+            _init_gv(toggle_reference=True, reference_door_endstops_ms=None)
+            door = DOOR()
+            runner = _make_runner(door)
+            returned = runner.step()   # blocks ~0.3 s then returns
+        finally:
+            door_mod.referenceSequenceTimeout = saved
+
+        assert returned is False
+        assert door.ErrorState() is True
+        assert "timed out" in (door.errorState or "").lower()
+        assert global_vars.instance().get_value("toggle_reference_of_endstops") is False
+
+    def test_upper_endstop_timeout_sets_error(self):
+        """Reference aborts with error when upper endstop is never reached."""
+        import door as door_mod
+        saved = door_mod.referenceSequenceTimeout
+        door_mod.referenceSequenceTimeout = 0.5
+
+        try:
+            _init_gv(toggle_reference=True, reference_door_endstops_ms=None)
+            door = DOOR()
+            runner = _make_runner(door)
+
+            result: dict = {}
+
+            def _run() -> None:
+                result["returned"] = runner.step()
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+
+            # Quickly satisfy the lower phase so the upper phase can time out
+            time.sleep(0.1)
+            _trigger_lower()
+
+            t.join(timeout=4)
+            assert not t.is_alive()
+        finally:
+            door_mod.referenceSequenceTimeout = saved
+
+        assert result["returned"] is False
+        assert door.ErrorState() is True
+        assert "timed out" in (door.errorState or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# Test: Premature lower-endstop detection
+# ---------------------------------------------------------------------------
+
+class TestPrematureEndstop:
+
+    def _setup(self) -> tuple[DOOR, DoorTaskRunner, list]:
+        """Create door + runner configured for auto-close premature tests."""
+        _init_gv(
+            auto_mode="True",
+            desired_door_state="closed",
+            reference_door_endstops_ms=REF_MS,
+        )
+        door = DOOR()
+        notifications: list = []
+        runner = _make_runner(door, notifications=notifications)
+        return door, runner, notifications
+
+    # ── single trigger ───────────────────────────────────────────────────────
+
+    def test_first_trigger_stops_motor_and_schedules_retry(self):
+        """First premature trigger: motor stops, 5-second retry is scheduled."""
+        door, runner, _ = self._setup()
+
+        _run_premature_cycle(runner, door)
+
+        assert door.get_state() == "stopped"
+        assert global_vars.instance().get_value("desired_door_state") == "stopped"
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_retry_pending is True
+        assert runner.auto_close_retry_time is not None
+        assert runner.auto_close_retry_time > time.time()
+        assert door.ErrorState() is False
+
+    def test_retry_fires_after_cooldown_reissues_close(self):
+        """After cooldown expires the runner re-issues the close command."""
+        door, runner, _ = self._setup()
+
+        _run_premature_cycle(runner, door)
+        assert runner.auto_close_retry_pending is True
+
+        # Artificially expire the cooldown
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()
+
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+        assert runner.auto_close_retry_pending is False
+        assert runner.auto_close_retry_time is None
+        # Door should now be closing again (retry triggered door.close())
+        assert door.get_state() == "closing"
+
+    # ── two triggers ─────────────────────────────────────────────────────────
+
+    def test_second_trigger_increments_counter_no_error(self):
+        """Two consecutive premature triggers: counter = 2, still no error."""
+        door, runner, _ = self._setup()
+
+        _run_premature_cycle(runner, door)
+        assert runner.auto_close_premature_count == 1
+
+        # Expire cooldown → door starts closing again
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+
+        # Second premature trigger
+        _run_premature_cycle(runner, door)
+
+        assert runner.auto_close_premature_count == 2
+        assert door.ErrorState() is False
+
+    # ── three triggers → error ───────────────────────────────────────────────
+
+    def test_three_triggers_enter_error_state_with_notification(self):
+        """Three consecutive premature triggers → error state + one notification."""
+        door, runner, notifications = self._setup()
+
+        for _ in range(2):
+            _run_premature_cycle(runner, door)
+            # Expire cooldown so the door can start closing again
+            runner.auto_close_retry_time = time.time() - 0.1
+            runner.step()
+            assert global_vars.instance().get_value("desired_door_state") == "closed"
+
+        # Third (fatal) trigger
+        _run_premature_cycle(runner, door)
+
+        assert door.ErrorState() is True
+        assert "prematurely" in (door.errorState or "").lower()
+        assert global_vars.instance().get_value("desired_door_state") == "stopped"
+        # Counter resets to 0 so repeat attempts after a clear start fresh
+        assert runner.auto_close_premature_count == 0
+        assert runner.auto_close_retry_pending is False
+        # Exactly one push notification (sent inside the premature block)
+        assert len(notifications) == 1
+        title, body = notifications[0]
+        assert "Door Error" in title
+        assert "prematurely" in body.lower()
+
+    # ── valid close resets counter ────────────────────────────────────────────
+
+    def test_valid_close_resets_premature_counter(self):
+        """A close that travels ≥ 80 % of reference time resets the counter."""
+        door, runner, _ = self._setup()
+
+        # Record one premature trigger to raise the counter
+        _run_premature_cycle(runner, door)
+        assert runner.auto_close_premature_count == 1
+
+        # Expire cooldown → door starts closing in this step
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()
+        assert door.get_state() == "closing"
+
+        # Simulate full-travel close: elapsed ≈ 90 % of reference (≥ 80 %)
+        door.startedMovingTime = time.time() - (REF_MS / 1000 * 0.9)
+        _trigger_lower()
+        assert door.get_state() == "closed"
+        _release_lower()
+
+        runner.step()  # timing check iteration
+
+        assert runner.auto_close_premature_count == 0
+        assert runner.auto_close_retry_pending is False
+        assert door.ErrorState() is False
+
+    # ── manual mode ──────────────────────────────────────────────────────────
+
+    def test_no_premature_detection_in_manual_mode(self):
+        """With auto_mode=False premature detection must not fire."""
+        _init_gv(
+            auto_mode="False",
+            desired_door_state="closed",
+            reference_door_endstops_ms=REF_MS,
+        )
+        door = DOOR()
+        runner = _make_runner(door)
+
+        # Start closing
+        runner.step()
+        assert door.get_state() == "closing"
+
+        # Simulate a fast (premature-looking) endstop hit
+        door.startedMovingTime = time.time() - 0.5  # only 0.5 s elapsed
+        _trigger_lower()
+        assert door.get_state() == "closed"
+
+        runner.step()
+
+        # No premature action in manual mode
+        assert runner.auto_close_premature_count == 0
+        assert runner.auto_close_retry_pending is False
+
+    # ── disable auto mid-cycle resets retry state ─────────────────────────────
+
+    def test_disabling_auto_mode_clears_retry_state(self):
+        """Disabling auto mode after a premature trigger clears all retry state."""
+        door, runner, _ = self._setup()
+
+        _run_premature_cycle(runner, door)
+        assert runner.auto_close_premature_count == 1
+
+        # Operator disables auto mode from the web UI
+        global_vars.instance().set_value("auto_mode", "False")
+        runner.step()
+
+        assert runner.auto_close_premature_count == 0
+        assert runner.auto_close_retry_pending is False
+        assert runner.auto_close_retry_time is None
+
+
+# ---------------------------------------------------------------------------
+# Test: Error state management
+# ---------------------------------------------------------------------------
+
+class TestErrorStateManagement:
+
+    def test_clear_error_flag_resets_door_and_retry_state(self):
+        """Setting clear_error_state=True clears door error and retry counters."""
+        _init_gv(auto_mode="False", desired_door_state="stopped")
+        door = DOOR()
+        runner = _make_runner(door)
+
+        # Inject error directly
+        door.ErrorState("Injected test error", stopDoor=False)
+        assert door.ErrorState() is True
+
+        # Simulate leftover retry state from a premature cycle
+        runner.auto_close_premature_count = 2
+        runner.auto_close_retry_pending = True
+        runner.auto_close_retry_time = time.time() + 999
+        runner.sentErrorNotification = True
+
+        # Tell the runner to clear the error
+        global_vars.instance().set_value("clear_error_state", True)
+        runner.step()
+
+        assert door.ErrorState() is False
+        assert runner.auto_close_premature_count == 0
+        assert runner.auto_close_retry_pending is False
+        assert runner.auto_close_retry_time is None
+        assert runner.sentErrorNotification is False
+        # Flag consumed
+        assert global_vars.instance().get_value("clear_error_state") is False
+
+    def test_error_state_drive_sends_notification_exactly_once(self):
+        """Error during motor drive emits one push notification even over N steps."""
+        _init_gv(auto_mode="False", desired_door_state="open")
+        door = DOOR()
+        notifications: list = []
+        runner = _make_runner(door, notifications=notifications)
+
+        # Inject error before any steps
+        door.ErrorState("Stuck", stopDoor=False)
+
+        for _ in range(4):
+            runner.step()
+
+        assert len(notifications) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Basic door movement
+# ---------------------------------------------------------------------------
+
+class TestBasicDoorMovement:
+
+    def test_desired_open_starts_opening(self):
+        """desired_door_state='open' → step calls door.open() → state 'opening'."""
+        _init_gv(auto_mode="False", desired_door_state="open")
+        door = DOOR()
+        runner = _make_runner(door)
+
+        runner.step()
+        assert door.get_state() == "opening"
+
+    def test_upper_endstop_transitions_to_open(self):
+        """Door transitions opening → open when upper endstop fires."""
+        _init_gv(auto_mode="False", desired_door_state="open")
+        door = DOOR()
+        runner = _make_runner(door)
+
+        runner.step()
+        assert door.get_state() == "opening"
+
+        _trigger_upper()
+        assert door.get_state() == "open"
+
+        runner.step()
+        assert door.get_state() == "open"
+
+    def test_desired_closed_starts_closing(self):
+        """desired_door_state='closed' → step calls door.close() → state 'closing'."""
+        _init_gv(auto_mode="False", desired_door_state="closed")
+        door = DOOR()
+        runner = _make_runner(door)
+
+        runner.step()
+        assert door.get_state() == "closing"
+
+    def test_lower_endstop_transitions_to_closed(self):
+        """Door transitions closing → closed when lower endstop fires."""
+        _init_gv(auto_mode="False", desired_door_state="closed")
+        door = DOOR()
+        runner = _make_runner(door)
+
+        runner.step()
+        assert door.get_state() == "closing"
+
+        _trigger_lower()
+        assert door.get_state() == "closed"
+
+        runner.step()
+        assert door.get_state() == "closed"
+
+    def test_move_budget_exhausted_sets_error(self):
+        """Error state set if endstop not reached within reference + margin time.
+
+        The motor timeout reads ``door.reference_door_endstops_ms`` (the DOOR
+        object's own attribute set by the reference sequence) — not the value
+        stored in global_vars.  Both must be populated for the timeout logic to
+        use the desired small budget.
+
+        Budget = 0.5 s reference + 1 s margin = 1.5 s.
+        thread_sleep_time = 0.5 s  →  error fires on step 5
+        (count sequence: 0 → 0.5 → 1.0 → 1.5 → 2.0 > 1.5 → error).
+        """
+        _init_gv(
+            auto_mode="False",
+            desired_door_state="open",
+            reference_door_endstops_ms=500,
+        )
+        door = DOOR()
+        # The motor timeout path uses door.reference_door_endstops_ms directly,
+        # so set it on the DOOR object as the reference sequence would.
+        door.reference_door_endstops_ms = 500
+        runner = _make_runner(door)
+
+        for _ in range(5):
+            runner.step()
+
+        assert door.ErrorState() is True

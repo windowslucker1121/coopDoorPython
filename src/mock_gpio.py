@@ -61,4 +61,15 @@ class MockGPIO:
     def get_all_pins():
         return globalPins
 
+    @staticmethod
+    def cleanup():
+        """Clear all pin state and registered callbacks.
+
+        Call this between tests to prevent stale GPIO state and leftover
+        callbacks from previous :class:`~door.DOOR` instances from
+        interfering with subsequent tests.
+        """
+        globalPins.clear()
+        callbacks.clear()
+
 GPIO = MockGPIO()

@@ -36,6 +36,17 @@ class protected_dict:
         with self._instance_lock:
             return copy.deepcopy(self._dictionary)
 
+    @classmethod
+    def reset_for_testing(cls):
+        """Clear all stored values.
+
+        Resets the shared dictionary so tests start with a clean slate
+        without needing to re-create the singleton object itself.
+        Intended for use in test fixtures only.
+        """
+        with cls._instance_lock:
+            cls._dictionary.clear()
+
 if __name__ == '__main__':
     singleton_dict = protected_dict.instance()
     singleton_dict.set_value("key0", "value0")
