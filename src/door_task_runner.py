@@ -67,6 +67,10 @@ class DoorTaskRunner:
         self.auto_close_retry_pending = False
         self.auto_close_retry_time = None
         self.was_door_closing = False  # door state at end of previous iteration
+        # Set to True when a retry is fired so that premature detection and the
+        # drive block can run even if the lower endstop is still physically active
+        # (door_state == d_door_state == "closed" but motor never ran).
+        self._close_retry_just_fired = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,6 +112,7 @@ class DoorTaskRunner:
             self.auto_close_premature_count = 0
             self.auto_close_retry_pending = False
             self.auto_close_retry_time = None
+            self._close_retry_just_fired = False
 
         if toogle_reference_of_endstops:
             logger.info("Referencing door endstops, waiting for completion.")
@@ -132,6 +137,7 @@ class DoorTaskRunner:
             # After a reference sequence the door state is fresh; don't let
             # a stale was_door_closing flag cause a spurious premature detection.
             self.was_door_closing = False
+            self._close_retry_just_fired = False
 
         else:
             # ------------------------------------------------------------------
@@ -218,7 +224,7 @@ class DoorTaskRunner:
             if (
                 auto_mode
                 and not self.door_override
-                and self.was_door_closing
+                and (self.was_door_closing or self._close_retry_just_fired)
                 and door_state == "closed"
                 and d_door_state == "closed"
                 and door.startedMovingTime is not None
@@ -254,6 +260,7 @@ class DoorTaskRunner:
                         self.auto_close_premature_count = 0
                         self.auto_close_retry_pending = False
                         self.auto_close_retry_time = None
+                        self._close_retry_just_fired = False
                     else:
                         # Physically stop the motor and mark state as
                         # "stopped" so the desired-state mismatch logic will
@@ -268,6 +275,7 @@ class DoorTaskRunner:
                         global_vars.instance().set_value("desired_door_state", "stopped")
                         self.auto_close_retry_pending = True
                         self.auto_close_retry_time = time.time() + 5.0
+                        self._close_retry_just_fired = False
                         logger.info(
                             "Auto-close retry scheduled in 5 s (attempt %d/3).",
                             self.auto_close_premature_count,
@@ -283,6 +291,7 @@ class DoorTaskRunner:
                     self.auto_close_premature_count = 0
                     self.auto_close_retry_pending = False
                     self.auto_close_retry_time = None
+                    self._close_retry_just_fired = False
 
             # Fire the auto-close retry once the 5-second cooldown has elapsed.
             if (
@@ -293,6 +302,13 @@ class DoorTaskRunner:
                 logger.info("Auto-close retry: re-issuing close command.")
                 self.auto_close_retry_pending = False
                 self.auto_close_retry_time = None
+                # Reset timing so premature detection measures from THIS retry attempt,
+                # not from the original close that was interrupted.
+                door.startedMovingTime = time.time()
+                # Flag: force the drive block and premature detection to run even if
+                # check_endstops() has already set door_state == d_door_state == "closed"
+                # (i.e. the lower endstop is still physically active).
+                self._close_retry_just_fired = True
                 global_vars.instance().set_value("desired_door_state", "closed")
                 # Re-read so this iteration's logic sees the updated desired state.
                 d_door_state = "closed"
@@ -302,6 +318,7 @@ class DoorTaskRunner:
                 self.auto_close_premature_count = 0
                 self.auto_close_retry_pending = False
                 self.auto_close_retry_time = None
+                self._close_retry_just_fired = False
 
             # If we are in override mode, then the door is being moved by
             # the physical switch.
@@ -313,8 +330,12 @@ class DoorTaskRunner:
                 global_vars.instance().set_value("desired_door_state", door.get_state())
 
             # If the door state does not match the desired door state, move
-            # the door.
-            elif door_state != d_door_state:
+            # the door.  Also force a close attempt when the retry just fired
+            # but the lower endstop is still active (door_state == d_door_state ==
+            # "closed" even though the motor never ran).
+            elif door_state != d_door_state or (
+                self._close_retry_just_fired and door_state == "closed"
+            ):
                 if door.ErrorState():
                     door.stop()
                     self.door_move_count = 0

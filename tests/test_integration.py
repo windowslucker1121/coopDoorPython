@@ -439,6 +439,106 @@ class TestPrematureEndstop:
         assert runner.auto_close_premature_count == 0
         assert runner.auto_close_retry_pending is False
 
+    # ── lingering endstop (from real-world log 2026-03-03) ───────────────────
+
+    def test_retry_fires_after_endstop_stays_active_then_releases(self):
+        """Real-world log scenario: endstop callback fires after premature stop,
+        polling keeps seeing it for several iterations, then it releases.
+        The retry must still re-issue the close and start the door moving.
+
+        In the real log the endstop released ~4 s before the 5-s retry fired,
+        so the retry should always succeed once the pin goes low.
+        """
+        door, runner, _ = self._setup()
+
+        # ── phase 1: premature trigger ────────────────────────────────────────
+        global_vars.instance().set_value("desired_door_state", "closed")
+        runner.step()
+        assert door.get_state() == "closing"
+
+        door.startedMovingTime = time.time() - 1.0   # only 1 s elapsed
+        _trigger_lower()                               # callback sets "closed"
+        assert door.get_state() == "closed"
+        # Do NOT release yet — endstop still physically active
+
+        runner.step()   # detects premature trigger
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_retry_pending is True
+
+        # ── phase 2: several iterations with endstop still active ─────────────
+        # (mirrors the repeated "stop because door is in moving state" log lines)
+        for _ in range(3):
+            runner.step()
+            assert door.ErrorState() is False
+
+        # ── phase 3: chicken moves away, endstop releases ─────────────────────
+        _release_lower()
+        runner.step()   # one iteration with inactive endstop
+
+        # ── phase 4: retry fires ──────────────────────────────────────────────
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()
+
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+        assert runner.auto_close_retry_pending is False
+        assert door.get_state() == "closing", (
+            f"Expected door to be closing after retry, got {door.get_state()!r}"
+        )
+        assert door.ErrorState() is False
+        assert runner.auto_close_premature_count == 1   # unchanged — still on attempt 1
+
+    def test_retry_stuck_when_endstop_still_active_at_retry_time(self):
+        """Bug scenario: endstop remains active through the entire cooldown.
+
+        Without the fix, when the retry fires ``check_endstops()`` has already
+        set ``door_state = d_door_state = "closed"`` so the drive block's
+        ``elif door_state != d_door_state`` is False, ``door.close()`` is never
+        called, and the door is permanently stuck.
+
+        With the fix (``_close_retry_just_fired`` flag + fresh ``startedMovingTime``),
+        the drive block is forced to run, and if the endstop is still active the
+        next iteration's premature detection fires again, incrementing the counter
+        toward the error-state threshold.
+        """
+        door, runner, notifications = self._setup()
+
+        # ── premature trigger ────────────────────────────────────────────────
+        global_vars.instance().set_value("desired_door_state", "closed")
+        runner.step()
+        assert door.get_state() == "closing"
+
+        door.startedMovingTime = time.time() - 1.0
+        _trigger_lower()
+        assert door.get_state() == "closed"
+        # Leave endstop active — chicken is still in the doorway
+
+        runner.step()   # detects premature trigger
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_retry_pending is True
+
+        # ── retry fires while endstop is STILL active ──────────────────────
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()   # retry fires; drive block runs; endstop still HIGH →
+                        # door.close() returns immediately, sets "closed" without
+                        # running the motor; _close_retry_just_fired stays True
+        runner.step()   # _close_retry_just_fired flag is seen by premature check
+                        # → count incremented to 2, new retry scheduled
+
+        # After the retry the door must NOT be stuck in a silent "closed"
+        # limbo.  The system must either:
+        #   (a) have a SECOND retry pending (premature count incremented), or
+        #   (b) have entered error state (if this pushed the count to ≥ 3).
+        assert runner.auto_close_premature_count >= 2 or door.ErrorState() is True, (
+            f"Door stuck: state={door.get_state()!r}, "
+            f"desired={global_vars.instance().get_value('desired_door_state')!r}, "
+            f"premature_count={runner.auto_close_premature_count}, "
+            f"retry_pending={runner.auto_close_retry_pending}, "
+            f"error={door.ErrorState()}"
+        )
+
+        # Release endstop so subsequent test teardown is clean
+        _release_lower()
+
     # ── disable auto mid-cycle resets retry state ─────────────────────────────
 
     def test_disabling_auto_mode_clears_retry_state(self):
