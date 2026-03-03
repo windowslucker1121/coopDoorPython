@@ -489,6 +489,11 @@ def door_task():
                         # retrigger a close command after the cooldown.
                         door.stop(state="stopped")
                         door_state = door.get_state()
+                        # Update the LOCAL d_door_state too so the drive block
+                        # later in this same iteration does NOT see a mismatch
+                        # and call door.close() again (which would immediately
+                        # re-trigger the still-active lower endstop).
+                        d_door_state = "stopped"
                         global_vars.instance().set_value("desired_door_state", "stopped")
                         auto_close_retry_pending = True
                         auto_close_retry_time = time.time() + 5.0
@@ -553,7 +558,11 @@ def door_task():
                         logger.debug(f"Reference to endstops not set, the door will move {DOOR_MOVE_MAX_AFTER_ENDSTOPS+endstopTimeout} seconds.")
                     match d_door_state:
                         case "stopped":
-                            if door_state in ["open", "closed"]:
+                            if door_state in ["open", "closed"] and not auto_close_retry_pending:
+                                # Normal reconcile: door reached an endstop while
+                                # desired=stopped, so align desired to actual.
+                                # Skipped when a premature-endstop retry is pending
+                                # to prevent the retry from being clobbered.
                                 logger.debug("stop: door already at endstop (%s), reconciling desired state", door_state)
                                 door.stop(door_state)
                                 global_vars.instance().set_value("desired_door_state", door_state)
