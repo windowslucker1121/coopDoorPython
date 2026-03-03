@@ -640,6 +640,88 @@
             margin-top: 4px;
         }
 
+        /* ── Door SVG Animation ──────────────────────────────── */
+        .door-svg {
+            width: 80px;
+            height: 100px;
+            margin-bottom: 12px;
+            overflow: visible;
+        }
+
+        /* Structural elements */
+        .door-post        { fill: #8B6F47; }
+        .door-beam        { fill: #8B6F47; }
+        .door-ground-fill { fill: #6b7c45; }
+        .door-frame-border { stroke: #5a4a30; stroke-width: 1.5; fill: none; }
+
+        /* Panel fill — default (unknown state) */
+        .door-panel-fill { fill: var(--text-muted); transition: fill 0.4s ease; }
+        .door-slat        { fill: rgba(255,255,255,0.18); }
+
+        /* Panel group animation target */
+        #door-panel-group { transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* State positions */
+        .door-svg.state-open   #door-panel-group { transform: translateY(-76px); }
+        .door-svg.state-closed #door-panel-group { transform: translateY(0px);   }
+        .door-svg.state-stopped #door-panel-group { transform: translateY(-38px); }
+
+        /* State colours */
+        .door-svg.state-open    .door-panel-fill { fill: var(--btn-open);       }
+        .door-svg.state-closed  .door-panel-fill { fill: #888;                  }
+        .door-svg.state-opening .door-panel-fill { fill: var(--accent);         }
+        .door-svg.state-closing .door-panel-fill { fill: var(--btn-reference);  }
+        .door-svg.state-stopped .door-panel-fill { fill: var(--btn-reference);  }
+
+        /* Keyframe animations */
+        @keyframes door-opening {
+            0%   { transform: translateY(0px);   }
+            100% { transform: translateY(-76px); }
+        }
+        @keyframes door-closing {
+            0%   { transform: translateY(-76px); }
+            100% { transform: translateY(0px);   }
+        }
+
+        .door-svg.state-opening #door-panel-group {
+            animation: door-opening 2s ease-in-out infinite alternate;
+        }
+        .door-svg.state-closing #door-panel-group {
+            animation: door-closing 2s ease-in-out infinite alternate;
+        }
+
+        /* Direction arrows */
+        #door-arrow-up,
+        #door-arrow-down {
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            fill: rgba(255,255,255,0.92);
+            stroke: rgba(0,0,0,0.22);
+            stroke-width: 1;
+            stroke-linejoin: round;
+            transform-box: fill-box;
+            transform-origin: center;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+        }
+
+        .door-svg.state-opening #door-arrow-up {
+            opacity: 1;
+            animation: arrow-bounce-up 0.85s ease-in-out infinite;
+        }
+        .door-svg.state-closing #door-arrow-down {
+            opacity: 1;
+            animation: arrow-bounce-down 0.85s ease-in-out infinite;
+        }
+
+        @keyframes arrow-bounce-up {
+            0%, 100% { transform: translateY(0);    }
+            50%       { transform: translateY(-5px); }
+        }
+        @keyframes arrow-bounce-down {
+            0%, 100% { transform: translateY(0);   }
+            50%       { transform: translateY(5px); }
+        }
+
         /* Action Buttons */
         .action-buttons {
             display: grid;
@@ -960,7 +1042,43 @@
                     <div class="door-panel">
                         <!-- State Display -->
                         <div class="state-display" id="state">
-                            <!-- Injected by JS -->
+                            <svg id="door-svg" class="door-svg" viewBox="0 0 80 100"
+                                 xmlns="http://www.w3.org/2000/svg" aria-label="Door state">
+                                <defs>
+                                    <clipPath id="door-clip">
+                                        <rect x="12" y="12" width="56" height="76"/>
+                                    </clipPath>
+                                </defs>
+                                <!-- Ground -->
+                                <rect x="0" y="88" width="80" height="12" rx="2" class="door-ground-fill"/>
+                                <!-- Posts -->
+                                <rect x="2"  y="8" width="10" height="80" rx="2" class="door-post"/>
+                                <rect x="68" y="8" width="10" height="80" rx="2" class="door-post"/>
+                                <!-- Top beam -->
+                                <rect x="2" y="2" width="76" height="10" rx="2" class="door-beam"/>
+                                <!-- Sliding panel (clipped to frame opening) -->
+                                <g clip-path="url(#door-clip)">
+                                    <g id="door-panel-group">
+                                        <rect x="12" y="12" width="56" height="76" rx="1" class="door-panel-fill"/>
+                                        <rect x="16" y="16" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="30" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="44" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="58" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="72" width="48" height="10" rx="1" class="door-slat"/>
+                                    </g>
+                                </g>
+                                <!-- Frame border overlay -->
+                                <rect x="12" y="12" width="56" height="76" rx="1" class="door-frame-border"/>
+                                <!-- Direction arrows (visible only during opening / closing) -->
+                                <!-- Up arrow: tip at (40,29), chevron wings at y=47, shaft to y=61 -->
+                                <polygon id="door-arrow-up"
+                                    points="40,29 53,47 46,47 46,61 34,61 34,47 27,47"/>
+                                <!-- Down arrow: tip at (40,71), chevron wings at y=53, shaft to y=39 -->
+                                <polygon id="door-arrow-down"
+                                    points="40,71 27,53 34,53 34,39 46,39 46,53 53,53"/>
+                            </svg>
+                            <div id="door-state-label" class="door-state-label">—</div>
+                            <div id="door-state-sub"   class="door-state-sub">connecting…</div>
                         </div>
 
                         <!-- Manual Actions -->
@@ -1393,24 +1511,27 @@
             document.getElementById('auto_info').style.display = isAutoMode ? "block" : "none";
             document.getElementById('toggle').classList.toggle('on', isAutoMode);
 
+            const doorSvg   = document.getElementById('door-svg');
+            const doorLabel = document.getElementById('door-state-label');
+            const doorSub   = document.getElementById('door-state-sub');
+
             if (data.override !== "off") {
-                if (current_state !== (data.override + ".switch")) {
-                    document.getElementById('state').innerHTML =
-                        `<img src="static/${data.override}.png" alt="${data.override}" onerror="this.style.display='none'">` +
-                        `<div class="door-state-label">${data.override}</div>` +
-                        `<div class="door-state-sub">Manual Override</div>`;
-                    current_state = data.override + ".switch";
+                const state_key = data.state + "-" + data.override + ".switch";
+                if (current_state !== state_key) {
+                    doorSvg.setAttribute('class', 'door-svg state-' + data.state);
+                    doorLabel.textContent = data.override;
+                    doorSub.textContent   = 'Manual Override';
+                    current_state = state_key;
                 }
             } else {
-                let isAuto = (data.auto_mode === "True");
+                let isAuto   = (data.auto_mode === "True");
                 let modeText = isAuto ? "Auto Controlled" : "Manual Mode";
                 let state_key = data.state + "-" + isAuto;
 
                 if (current_state !== state_key) {
-                    document.getElementById('state').innerHTML =
-                        `<img src="static/${data.state}.png" alt="${data.state}" onerror="this.style.display='none'">` +
-                        `<div class="door-state-label">${data.state}</div>` +
-                        `<div class="door-state-sub">${modeText}</div>`;
+                    doorSvg.setAttribute('class', 'door-svg state-' + data.state);
+                    doorLabel.textContent = data.state;
+                    doorSub.textContent   = modeText;
                     current_state = state_key;
                 }
             }
