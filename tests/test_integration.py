@@ -24,6 +24,7 @@ Premature lower-endstop detection (auto-close safety)
  12. Endstop still active at retry time — stuck-state regression.
  13. door_move_count not reset after retry — motor budget accumulates correctly.
  14. Auto-mode sunset window does not bypass retry cooldown.
+ 15. Cumulative drive time across retries prevents false error on genuine multi-part close.
 
 Error state management
  11. ``clear_error_state`` flag clears door error and retry counters.
@@ -424,6 +425,7 @@ class TestPrematureEndstop:
 
         assert runner.auto_close_premature_count == 0
         assert runner.auto_close_retry_pending is False
+        assert runner.auto_close_cumulative_drive_s == 0.0
         assert door.ErrorState() is False
 
     # ── manual mode ──────────────────────────────────────────────────────────
@@ -593,6 +595,75 @@ class TestPrematureEndstop:
             f"door_move_count was reset instead of accumulating: "
             f"expected 1.0, got {count_after_second}"
         )
+
+    # ── cumulative drive time prevents false error after genuine multi-part close ─
+
+    def test_cumulative_drive_time_prevents_false_error_after_genuine_close(self):
+        """Real-world regression: door closes in multiple partial runs whose
+        total accumulated drive time meets the reference threshold — should be
+        treated as a VALID close, not as repeated premature triggers.
+
+        Scenario from log 2026-03-05 (ref ≈ 17.6 s, threshold 80% ≈ 14.1 s):
+          attempt 1: 5.5 s elapsed (chicken lifts door briefly)      cumulative=5.5
+          attempt 2: 3.5 s elapsed (chicken again)                   cumulative=9.1
+          attempt 3: 8.1 s elapsed (door reaches ground, total=17.2) → VALID CLOSE
+
+        Without the fix each attempt is judged by its own elapsed time; after a
+        valid close the endstop remains active and two more 0.5-s "attempts"
+        (elapsed each measured from the freshly-reset startedMovingTime) push the
+        premature counter to 5, triggering an error for a door that is actually
+        fully closed.
+
+        With the fix (``auto_close_cumulative_drive_s``):
+          attempt 1: 2 s   cumulative=2 s < threshold(8 s)  → premature (count=1)
+          attempt 2: 3 s   cumulative=5 s < threshold       → premature (count=2)
+          attempt 3: 4 s   total=5+4=9 s ≥ threshold        → VALID, reset counter
+        """
+        door, runner, notifications = self._setup()
+        ref_s = REF_MS / 1000.0          # 10 s
+        threshold_s = ref_s * runner.PREMATURE_CLOSE_THRESHOLD  # 8 s
+
+        # ── attempt 1: 2 s elapsed → premature ──────────────────────────────
+        global_vars.instance().set_value("desired_door_state", "closed")
+        runner.step()
+        assert door.get_state() == "closing"
+        door.startedMovingTime = time.time() - 2.0
+        _trigger_lower()
+        _release_lower()
+        runner.step()
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_cumulative_drive_s == pytest.approx(2.0, abs=0.1)
+
+        # ── attempt 2: 3 s elapsed → still premature ─────────────────────────
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()   # retry fires → door starts closing
+        assert door.get_state() == "closing"
+        door.startedMovingTime = time.time() - 3.0
+        _trigger_lower()
+        _release_lower()
+        runner.step()
+        assert runner.auto_close_premature_count == 2
+        assert runner.auto_close_cumulative_drive_s == pytest.approx(5.0, abs=0.1)
+
+        # ── attempt 3: 4 s elapsed → cumulative = 9 s ≥ 8 s → VALID CLOSE ────
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()   # retry fires → door starts closing
+        assert door.get_state() == "closing"
+        door.startedMovingTime = time.time() - 4.0
+        _trigger_lower()
+        _release_lower()
+        runner.step()   # premature check → total=9 s ≥ 8 s → valid
+
+        assert runner.auto_close_premature_count == 0, (
+            f"Expected count reset to 0 on valid cumulative close, "
+            f"got {runner.auto_close_premature_count}"
+        )
+        assert runner.auto_close_cumulative_drive_s == 0.0, (
+            "Cumulative drive time must reset after a valid close"
+        )
+        assert runner.auto_close_retry_pending is False
+        assert door.ErrorState() is False
+        assert len(notifications) == 0, "No error notification should be sent"
 
     # ── auto-mode sunset window must not override retry cooldown ─────────────
 

@@ -72,6 +72,12 @@ class DoorTaskRunner:
         # (door_state == d_door_state == "closed" but motor never ran).
         self._close_retry_just_fired = False
         self.PREMATURE_CLOSE_MAX_RETRIES = 5
+        # Cumulative seconds the motor was actually running toward "closed" across
+        # all retry attempts in the current close cycle.  Added to the per-attempt
+        # elapsed time so that a door that legitimately closes in multiple partial
+        # runs (chicken briefly pushing it up twice) is not counted as premature
+        # once the accumulated drive time reaches the reference-travel threshold.
+        self.auto_close_cumulative_drive_s = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -114,6 +120,7 @@ class DoorTaskRunner:
             self.auto_close_retry_pending = False
             self.auto_close_retry_time = None
             self._close_retry_just_fired = False
+            self.auto_close_cumulative_drive_s = 0.0
 
         if toogle_reference_of_endstops:
             logger.info("Referencing door endstops, waiting for completion.")
@@ -242,12 +249,20 @@ class DoorTaskRunner:
             ):
                 elapsed_close_s = time.time() - door.startedMovingTime
                 ref_close_s = reference_door_endstops_ms / 1000.0
-                if elapsed_close_s < ref_close_s * self.PREMATURE_CLOSE_THRESHOLD:
+                # Total drive time = time accumulated in previous retry attempts
+                # plus the elapsed time in the current attempt.  Using the total
+                # means a door that closes in several partial runs (chicken blocks
+                # it briefly each time) is correctly recognised as a genuine close
+                # once the sum of all drives meets the threshold.
+                total_drive_s = self.auto_close_cumulative_drive_s + elapsed_close_s
+                if total_drive_s < ref_close_s * self.PREMATURE_CLOSE_THRESHOLD:
+                    self.auto_close_cumulative_drive_s += elapsed_close_s
                     self.auto_close_premature_count += 1
                     logger.warning(
                         "Premature lower endstop during auto-close "
-                        "(elapsed=%.2fs, ref=%.2fs, attempt=%d/%d)",
+                        "(elapsed=%.2fs, cumulative=%.2fs, ref=%.2fs, attempt=%d/%d)",
                         elapsed_close_s,
+                        self.auto_close_cumulative_drive_s,
                         ref_close_s,
                         self.auto_close_premature_count,
                         self.PREMATURE_CLOSE_MAX_RETRIES,
@@ -266,6 +281,7 @@ class DoorTaskRunner:
                         self.auto_close_retry_pending = False
                         self.auto_close_retry_time = None
                         self._close_retry_just_fired = False
+                        self.auto_close_cumulative_drive_s = 0.0
                     else:
                         # Physically stop the motor and mark state as
                         # "stopped" so the desired-state mismatch logic will
@@ -282,22 +298,25 @@ class DoorTaskRunner:
                         self.auto_close_retry_time = time.time() + 5.0
                         self._close_retry_just_fired = False
                         logger.info(
-                            "Auto-close retry scheduled in 5 s (attempt %d/%d).",
+                            "Auto-close retry scheduled in 5 s (attempt %d/%d, cumulative drive %.2fs).",
                             self.auto_close_premature_count,
                             self.PREMATURE_CLOSE_MAX_RETRIES,
+                            self.auto_close_cumulative_drive_s,
                         )
                 else:
-                    # Endstop triggered at the expected time — genuine close.
+                    # Total accumulated drive time meets the threshold — genuine close.
                     logger.debug(
-                        "Auto-close timing valid (elapsed=%.2fs, ref=%.2fs). "
+                        "Auto-close timing valid (elapsed=%.2fs, cumulative=%.2fs, ref=%.2fs). "
                         "Resetting premature counter.",
                         elapsed_close_s,
+                        total_drive_s,
                         ref_close_s,
                     )
                     self.auto_close_premature_count = 0
                     self.auto_close_retry_pending = False
                     self.auto_close_retry_time = None
                     self._close_retry_just_fired = False
+                    self.auto_close_cumulative_drive_s = 0.0
 
             # Fire the auto-close retry once the 5-second cooldown has elapsed.
             if (
@@ -330,6 +349,7 @@ class DoorTaskRunner:
                 self.auto_close_retry_pending = False
                 self.auto_close_retry_time = None
                 self._close_retry_just_fired = False
+                self.auto_close_cumulative_drive_s = 0.0
 
             # If we are in override mode, then the door is being moved by
             # the physical switch.
