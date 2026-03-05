@@ -1033,8 +1033,14 @@
         <a class="debug-btn" href="/debug">🐛 Debug</a>
 
         <!-- Mock panel button -->
-        <!-- Flask Jinja logic removed for UI preview -->
+        {% if is_windows %}
         <a class="mock-btn" href="/mock">🧪 Mock</a>
+        {% else %}
+        <div class="mock-btn-disabled-wrapper">
+            <span class="mock-btn-disabled">🧪 Mock</span>
+            <div class="mock-tooltip">Deactivated — real hardware in use</div>
+        </div>
+        {% endif %}
 
         <!-- Update button -->
         <button class="update-btn" id="updateApp" onclick="triggerUpdate()">🔄 Update</button>
