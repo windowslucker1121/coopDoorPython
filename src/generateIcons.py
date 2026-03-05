@@ -97,6 +97,65 @@ def render_icon(size: int) -> np.ndarray:
     return img
 
 
+def render_maskable_icon(size: int) -> np.ndarray:
+    """
+    Render a maskable variant of the icon at `size` × `size` pixels (BGRA).
+
+    Maskable icons must have:
+      - Full bleed opaque background (no transparent corners)
+      - All content within the inner 80% safe zone (10% padding each side)
+    The OS (Android etc.) applies its own adaptive shape (circle, squircle…),
+    so no custom rounded-corner clipping is applied here.
+    """
+    s = size
+    safe_start = int(round(0.10 * s))
+    safe_size  = int(round(0.80 * s))
+
+    def p(v: float) -> int:
+        """Map a 0-100 percentage into the safe zone pixel coordinate."""
+        return safe_start + int(round(v * safe_size / 100))
+
+    img = np.zeros((s, s, 4), dtype=np.uint8)
+
+    # Full-bleed background (no alpha cutout)
+    img[:, :] = _bgra("#317EFB")
+
+    # ── Sky ───────────────────────────────────────────────────
+    cv2.rectangle(img, (p(22), p(18)), (p(78), p(82)), _bgra("#b8d4f5"), -1)
+
+    # ── Ground strip ──────────────────────────────────────────
+    cv2.rectangle(img, (0, p(80)), (s, s), _bgra("#4a6b2a"), -1)
+    # Keep ground within safe zone horizontally for clarity
+    cv2.rectangle(img, (0, p(80)), (safe_start, s), _bgra("#317EFB"), -1)
+    cv2.rectangle(img, (safe_start + safe_size, p(80)), (s, s), _bgra("#317EFB"), -1)
+
+    # ── Left post ─────────────────────────────────────────────
+    cv2.rectangle(img, (p(10), p(12)), (p(22), p(82)), _bgra("#8B6F47"), -1)
+    # ── Right post ────────────────────────────────────────────
+    cv2.rectangle(img, (p(78), p(12)), (p(90), p(82)), _bgra("#8B6F47"), -1)
+    # ── Top beam ──────────────────────────────────────────────
+    cv2.rectangle(img, (p(10), p(10)), (p(90), p(22)), _bgra("#8B6F47"), -1)
+
+    # ── Door panel half-open ──────────────────────────────────
+    cv2.rectangle(img, (p(22), p(50)), (p(78), p(82)), _bgra("#c8a96e"), -1)
+
+    # ── Slats ─────────────────────────────────────────────────
+    slat_color = _bgra("#d9bc84")
+    slat_h = max(1, int(round(0.04 * safe_size)))
+    for base_pct in [53, 61, 69, 77]:
+        y = p(base_pct)
+        if y + slat_h <= p(82):
+            cv2.rectangle(img, (p(25), y), (p(75), y + slat_h), slat_color, -1)
+
+    # ── Frame border ──────────────────────────────────────────
+    border_thick = max(2, int(round(0.02 * safe_size)))
+    cv2.rectangle(img,
+                  (p(22), p(18)), (p(78), p(82)),
+                  _bgra("#5a4a30"), border_thick)
+
+    return img
+
+
 # ── Sizes ────────────────────────────────────────────────────────────────────
 
 SIZES = {
@@ -105,6 +164,11 @@ SIZES = {
     "icon_144x144.png": 144,
     "icon_192x192.png": 192,
     "icon_512x512.png": 512,
+}
+
+MASKABLE_SIZES = {
+    "icon_maskable_192x192.png": 192,
+    "icon_maskable_512x512.png": 512,
 }
 
 
@@ -119,6 +183,12 @@ def main() -> None:
         path = os.path.join(icons_dir, filename)
         cv2.imwrite(path, icon)
         print(f"  ✓  {path}  ({size}×{size})")
+
+    for filename, size in MASKABLE_SIZES.items():
+        icon = render_maskable_icon(size)
+        path = os.path.join(icons_dir, filename)
+        cv2.imwrite(path, icon)
+        print(f"  ✓  {path}  ({size}×{size}, maskable)")
 
     # Convenience copies in static/ root (used directly by <link rel="icon">)
     for alias, src_name in [("favicon_32.png", "icon_32x32.png"),
