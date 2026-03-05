@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Dinky Coop</title>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#317EFB"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Favicon: SVG (modern browsers) + PNG fallbacks -->
+    <link rel="icon" type="image/svg+xml"  href="{{url_for('static', filename='favicon.svg')}}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{url_for('static', filename='favicon_32.png')}}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{url_for('static', filename='favicon_16.png')}}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{url_for('static', filename='icons/icon_192x192.png')}}">
+    <link rel="manifest" href="/manifest.json">
+    <style>
+        /* ── CSS Variables ──────────────────────────────────── */
+        :root {
+            --bg:             #f0f2f5;
+            --surface:        #ffffff;
+            --surface-alt:    #f9f9fb;
+            --surface-hover:  #efefef;
+            --text:           #1a1a2e;
+            --text-muted:     #777;
+            --border:         #e2e2e8;
+            --shadow:         rgba(0,0,0,0.07);
+            --modal-overlay:  rgba(0,0,0,0.5);
+            --accent:         #317EFB;
+
+            --btn-reference:  #ff8c00;
+            --btn-stop:       #e05555;
+            --btn-open:       #3cb371;
+            --btn-close:      #888;
+            --btn-text:       #fff;
+
+            --val-min:  #0d98ba;
+            --val-max:  #ff8c00;
+
+            --radius:    10px;
+            --radius-sm:  6px;
+        }
+
+        [data-theme="dark"] {
+            --bg:            #1a1a2e;
+            --surface:       #252538;
+            --surface-alt:   #2e2e45;
+            --surface-hover: #33334d;
+            --text:          #e8e8f0;
+            --text-muted:    #aaa;
+            --border:        #3d3d5c;
+            --shadow:        rgba(0,0,0,0.3);
+            --modal-overlay: rgba(0,0,0,0.7);
+
+            --btn-stop:  #ff3f3f;
+            --btn-open:  #3fa85f;
+            --btn-close: #555;
+        }
+
+        /* ── Reset ──────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        /* ── Layout ─────────────────────────────────────────── */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* ── Dashboard Grid Layout ── */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            grid-auto-flow: row dense;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .dashboard-grid > .card {
+            margin-bottom: 0 !important;
+            grid-column: span 1;
+        }
+
+        @media (min-width: 800px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr 1fr; /* Max 2 boxes horizontally */
+            }
+
+            /* 2 boxes width */
+            #error_section,
+            #card-door,
+            #card-temperature,
+            #card-logs {
+                grid-column: span 2;
+            }
+
+            /* 1 box width */
+            #card-webcam,
+            #card-system,
+            #card-location,
+            #data_visualization_section {
+                grid-column: span 1;
+            }
+        }
+
+        .page-title {
+            text-align: center;
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 52px 0 20px;
+            color: var(--text);
+            position: relative;
+            cursor: default;
+            display: inline-block;
+        }
+
+        .page-title::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            color: var(--text);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 400;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px var(--shadow);
+            border: 1px solid var(--border, #ccc);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+
+        .page-title:hover::after {
+            opacity: 1;
+        }
+
+        .page-title-wrapper {
+            text-align: center;
+        }
+
+        /* ── Card ───────────────────────────────────────────── */
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px var(--shadow);
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        /* ── Collapsible ────────────────────────────────────── */
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            cursor: pointer;
+            background: var(--surface-alt);
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+            user-select: none;
+        }
+
+        .collapsible-header:hover { background: var(--surface-hover); }
+
+        .collapsible-header h3 {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .chevron {
+            font-size: 0.7rem;
+            transition: transform 0.25s;
+            color: var(--text-muted);
+        }
+
+        .collapsible-header.collapsed .chevron { transform: rotate(-90deg); }
+
+        .content-section { padding: 16px; }
+
+        /* ── Buttons ────────────────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--btn-text);
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            white-space: nowrap;
+            text-decoration: none;
+        }
+
+        .btn:hover  { opacity: 0.82; }
+        .btn:active { transform: scale(0.97); }
+
+        .btn-reference { background: var(--btn-reference); }
+        .btn-stop      { background: var(--btn-stop); }
+        .btn-open      { background: var(--btn-open); }
+        .btn-close     { background: var(--btn-close); }
+
+        /* ── Sensor rows ────────────────────────────────────── */
+        .sensor-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+            gap: 8px;
+        }
+
+        .sensor-row:last-child { border-bottom: none; }
+
+        .sensor-label {
+            font-weight: 600;
+            flex: 0 0 130px;
+            font-size: 0.95rem;
+        }
+
+        .sensor-values {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .val-min     { color: var(--val-min); font-size: 0.88rem; }
+        .val-current { font-weight: 700; font-size: 1.05rem; }
+        .val-max     { color: var(--val-max); font-size: 0.88rem; }
+
+        /* ── Section subtitle ───────────────────────────────── */
+        .section-subtitle {
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin: 18px 0 8px;
+        }
+
+        .section-subtitle:first-child { margin-top: 0; }
+
+        /* ── Form ───────────────────────────────────────────── */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .form-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .form-row label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .form-row input,
+        .form-row select,
+        select.select-full {
+            padding: 9px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface-alt);
+            color: var(--text);
+            font-size: 0.95rem;
+            width: 100%;
+        }
+
+        .form-row input:focus,
+        .form-row select:focus,
+        select.select-full:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(49,126,251,0.15);
+        }
+
+        /* ── Toggle switch ──────────────────────────────────── */
+        .toggle {
+            width: 50px;
+            height: 26px;
+            background: var(--border);
+            border-radius: 26px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+            flex-shrink: 0;
+        }
+
+        .toggle::before {
+            content: "";
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: var(--surface);
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        }
+
+        .toggle.on { background: var(--btn-open); }
+        .toggle.on::before { transform: translateX(24px); }
+
+        /* ── Error card ─────────────────────────────────────── */
+        #error_section { border-left: 4px solid var(--btn-stop); }
+
+        .error-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .error-row .label { font-weight: 600; }
+        .error-row .value { flex: 1; min-width: 100px; }
+
+        /* ── Webcam ─────────────────────────────────────────── */
+        .webcam-wrap {
+            display: flex;
+            justify-content: center;
+        }
+
+        .webcam-wrap img {
+            width: 100%;
+            max-width: 500px;
+            height: auto;
+            border-radius: var(--radius-sm);
+        }
+
+        /* ── Logs ───────────────────────────────────────────── */
+        #logs {
+            height: 260px;
+            overflow-y: auto;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            font-size: 0.82rem;
+            font-family: 'Courier New', monospace;
+            color: var(--text);
+        }
+
+        /* ── Modal ──────────────────────────────────────────── */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: var(--modal-overlay);
+            padding: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active { display: flex; }
+
+        .modal-content {
+            background: var(--surface);
+            color: var(--text);
+            border-radius: var(--radius);
+            padding: 24px 24px 20px;
+            width: 100%;
+            max-width: 480px;
+            position: relative;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 14px;
+            font-size: 2rem;
+            line-height: 1;
+            cursor: pointer;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            padding: 0;
+        }
+
+        /* ── Top bar (fixed button row) ──────────────────── */
+        .top-bar {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            z-index: 50;
+        }
+
+        /* ── Theme button ───────────────────────────────────── */
+        .theme-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+
+        .theme-btn:hover { opacity: 0.85; }
+
+        /* ── Debug button ──────────────────────────────────── */
+        .debug-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .debug-btn:hover { opacity: 0.85; }
+
+        /* ── Mock button ───────────────────────────────────── */
+        .mock-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .mock-btn:hover { opacity: 0.85; }
+
+        .mock-btn-disabled {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: not-allowed;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            opacity: 0.4;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .mock-btn-disabled-wrapper {
+            position: relative;
+        }
+
+        .mock-btn-disabled-wrapper:hover .mock-tooltip {
+            display: block;
+        }
+
+        .mock-tooltip {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            background: #333;
+            color: #fff;
+            font-size: 0.75rem;
+            padding: 5px 10px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        /* ── Update button ──────────────────────────────────── */
+        .update-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+
+        .update-btn:hover { opacity: 0.85; }
+
+        /* ── Install banner ─────────────────────────────────── */
+        .install-banner {
+            display: none;
+            text-align: center;
+            padding: 12px 16px;
+            background: var(--accent);
+            border-radius: var(--radius);
+            margin-bottom: 12px;
+        }
+
+        .install-banner .btn {
+            background: #fff;
+            color: var(--accent);
+        }
+
+        /* ── Temperature widget ─────────────────────────────── */
+        .temp-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        @media (min-width: 560px) {
+            .temp-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        .temp-panel {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--surface-alt);
+            padding: 12px;
+        }
+
+        .temp-panel-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+
+        .temp-panel-title {
+            font-weight: 800;
+            font-size: 0.95rem;
+            letter-spacing: 0.02em;
+        }
+
+        .temp-panel-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .metric {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px;
+            box-shadow: 0 1px 4px var(--shadow);
+        }
+
+        .metric-label {
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .metric-value {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .metric-value .current {
+            font-size: 1.7rem;
+            font-weight: 900;
+            line-height: 1.05;
+        }
+
+        .metric-value .hint {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .metric-minmax {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--surface-alt);
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .chip-min {
+            border-color: rgba(13, 152, 186, 0.35);
+            background: rgba(13, 152, 186, 0.10);
+        }
+
+        .chip-max {
+            border-color: rgba(255, 140, 0, 0.35);
+            background: rgba(255, 140, 0, 0.10);
+        }
+
+        [data-theme="dark"] .chip-min {
+            border-color: rgba(13, 152, 186, 0.55);
+            background: rgba(13, 152, 186, 0.14);
+        }
+
+        [data-theme="dark"] .chip-max {
+            border-color: rgba(255, 140, 0, 0.55);
+            background: rgba(255, 140, 0, 0.14);
+        }
+
+        /* ── Door Control Dashboard ─────────────────────────── */
+        .door-dashboard {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        @media (min-width: 600px) {
+            .door-dashboard { grid-template-columns: 1fr 1fr; }
+        }
+
+        .door-panel {
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Status Display */
+        .state-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 0;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+            box-shadow: inset 0 2px 4px var(--shadow);
+            min-height: 160px;
+        }
+
+        .state-display img {
+            width: 80px;
+            height: auto;
+            margin-bottom: 12px;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.15));
+        }
+
+        .door-state-label {
+            font-size: 1.25rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text);
+        }
+
+        .door-state-sub {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ── Door SVG Animation ──────────────────────────────── */
+        .door-svg {
+            width: 80px;
+            height: 100px;
+            margin-bottom: 12px;
+            overflow: visible;
+        }
+
+        /* Structural elements */
+        .door-post        { fill: #8B6F47; }
+        .door-beam        { fill: #8B6F47; }
+        .door-ground-fill { fill: #6b7c45; }
+        .door-frame-border { stroke: #5a4a30; stroke-width: 1.5; fill: none; }
+
+        /* Panel fill — default (unknown state) */
+        .door-panel-fill { fill: var(--text-muted); transition: fill 0.4s ease; }
+        .door-slat        { fill: rgba(255,255,255,0.18); }
+
+        /* Panel group animation target */
+        #door-panel-group { transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* State positions */
+        .door-svg.state-open   #door-panel-group { transform: translateY(-76px); }
+        .door-svg.state-closed #door-panel-group { transform: translateY(0px);   }
+        .door-svg.state-stopped #door-panel-group { transform: translateY(-38px); }
+
+        /* State colours */
+        .door-svg.state-open    .door-panel-fill { fill: var(--btn-open);       }
+        .door-svg.state-closed  .door-panel-fill { fill: #888;                  }
+        .door-svg.state-opening .door-panel-fill { fill: var(--accent);         }
+        .door-svg.state-closing .door-panel-fill { fill: var(--btn-reference);  }
+        .door-svg.state-stopped .door-panel-fill { fill: var(--btn-reference);  }
+
+        /* Keyframe animations */
+        @keyframes door-opening {
+            0%   { transform: translateY(0px);   }
+            100% { transform: translateY(-76px); }
+        }
+        @keyframes door-closing {
+            0%   { transform: translateY(-76px); }
+            100% { transform: translateY(0px);   }
+        }
+
+        .door-svg.state-opening #door-panel-group {
+            animation: door-opening 2s ease-in-out infinite alternate;
+        }
+        .door-svg.state-closing #door-panel-group {
+            animation: door-closing 2s ease-in-out infinite alternate;
+        }
+
+        /* Direction arrows */
+        #door-arrow-up,
+        #door-arrow-down {
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            fill: rgba(255,255,255,0.92);
+            stroke: rgba(0,0,0,0.22);
+            stroke-width: 1;
+            stroke-linejoin: round;
+            transform-box: fill-box;
+            transform-origin: center;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+        }
+
+        .door-svg.state-opening #door-arrow-up {
+            opacity: 1;
+            animation: arrow-bounce-up 0.85s ease-in-out infinite;
+        }
+        .door-svg.state-closing #door-arrow-down {
+            opacity: 1;
+            animation: arrow-bounce-down 0.85s ease-in-out infinite;
+        }
+
+        @keyframes arrow-bounce-up {
+            0%, 100% { transform: translateY(0);    }
+            50%       { transform: translateY(-5px); }
+        }
+        @keyframes arrow-bounce-down {
+            0%, 100% { transform: translateY(0);   }
+            50%       { transform: translateY(5px); }
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin-top: auto;
+        }
+
+        .btn-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 4px;
+            border-radius: var(--radius-sm);
+            border: none;
+            color: white;
+            font-weight: 700;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px var(--shadow);
+        }
+
+        .btn-action:active { transform: translateY(2px); box-shadow: none; }
+        .btn-action:hover { opacity: 0.9; }
+
+        .btn-action.open { background: var(--btn-open); }
+        .btn-action.stop { background: var(--btn-stop); }
+        .btn-action.close { background: var(--btn-close); }
+
+        .btn-action svg {
+            width: 24px;
+            height: 24px;
+            margin-bottom: 6px;
+            fill: currentColor;
+        }
+
+        /* Auto Controls */
+        .auto-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .auto-header h4 {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+
+        .auto-form {
+            background: var(--surface);
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .auto-inline-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .auto-inline-row label {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .auto-input-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .auto-input-group input[type="number"] {
+            width: 60px;
+            padding: 6px 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface-alt);
+            color: var(--text);
+            font-size: 0.95rem;
+            text-align: center;
+        }
+
+        .auto-timetable {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .time-box {
+            background: var(--surface);
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            text-align: center;
+            box-shadow: 0 1px 3px var(--shadow);
+        }
+
+        .time-box-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            font-weight: 800;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        .time-box-value {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        /* Warning Banner */
+        .ref-banner {
+            background: rgba(255, 140, 0, 0.15);
+            border: 1px solid var(--btn-reference);
+            border-radius: var(--radius-sm);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .ref-banner-text {
+            color: var(--text);
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        /* ── Responsive ─────────────────────────────────────── */
+        @media (max-width: 480px) {
+            body          { padding: 8px; }
+            .page-title   { font-size: 1.5rem; margin-top: 54px; }
+            .sensor-label { flex: 0 0 95px; }
+            .btn          { font-size: 0.88rem; padding: 9px 12px; }
+        }
+
+        /* ── Location Section ───────────────────────────────── */
+        .location-panel {
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .location-panel-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .location-panel-title svg {
+            width: 18px;
+            height: 18px;
+            fill: var(--accent);
+        }
+
+        .divider-text {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 20px 0;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .divider-text::before, .divider-text::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border);
+        }
+        .divider-text::before { margin-right: 12px; }
+        .divider-text::after { margin-left: 12px; }
+
+        .form-grid-2col {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        @media (min-width: 480px) {
+            .form-grid-2col { grid-template-columns: 1fr 1fr; }
+        }
+
+        .input-with-icon {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-with-icon svg {
+            position: absolute;
+            left: 12px;
+            width: 18px;
+            height: 18px;
+            fill: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .input-with-icon input,
+        .input-with-icon select {
+            padding-left: 38px !important;
+            width: 100%;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Offline modal -->
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div id="modal-body"></div>
+            <div id="modal-message"></div>
+        </div>
+    </div>
+
+    <!-- Top bar: fixed button row -->
+    <div class="top-bar">
+        <!-- Debug panel button -->
+        <a class="debug-btn" href="/debug">🐛 Debug</a>
+
+        <!-- Mock panel button -->
+        <!-- Flask Jinja logic removed for UI preview -->
+        <a class="mock-btn" href="/mock">🧪 Mock</a>
+
+        <!-- Update button -->
+        <button class="update-btn" id="updateApp" onclick="triggerUpdate()">🔄 Update</button>
+
+        <!-- Theme toggle -->
+        <button class="theme-btn" id="toggleTheme">🌙 Dark Mode</button>
+    </div>
+
+    <div class="container">
+        <div class="page-title-wrapper">
+            <h1 class="page-title" id="pageTitle">Coop Door</h1>
+        </div>
+
+        <!-- PWA install banner -->
+        <div class="install-banner" id="installBanner">
+            <button class="btn" id="installButton">📲 Install as App</button>
+        </div>
+
+            <div class="dashboard-grid">
+        <!-- ── Error ── -->
+        <div id="error_section" class="card" style="display: none;">
+            <div class="collapsible-header" onclick="toggleSection('errorSection', this)">
+                <h3>⚠️ Error State Active</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="errorSection" class="content-section">
+                <div class="error-row">
+                    <span class="label">Current Error:</span>
+                    <span class="value" id="errorMessage">none</span>
+                    <button class="btn btn-reference" onclick="clearErrorCommand()">Clear Error</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Webcam ── -->
+        <div id="card-webcam" class="card">
+            <div class="collapsible-header" onclick="toggleSection('webcam_section', this)">
+                <h3>📷 Webcam Livefeed</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="webcam_section" class="content-section">
+                <div class="webcam-wrap">
+                    <img id="webcamFeed" src="static/waiting.png" alt="Webcam feed">
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Door Control ── -->
+        <div id="card-door" class="card">
+            <div class="collapsible-header" onclick="toggleSection('door_control', this)">
+                <h3>🚪 Door Control</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="door_control" class="content-section">
+
+                <!-- Endstop reference warning -->
+                <div id="reference_buttons_div" style="display: none;">
+                    <div class="ref-banner">
+                        <div class="ref-banner-text">
+                            ⚠️ Reference Needed (Travel: <span id="reference_door_endstops_ms">{none}</span>)
+                        </div>
+                        <button class="btn btn-reference" onclick="sendReferenceCommand()">Trigger Reference</button>
+                    </div>
+                </div>
+
+                <div class="door-dashboard">
+                    <!-- Left: Manual Control -->
+                    <div class="door-panel">
+                        <!-- State Display -->
+                        <div class="state-display" id="state">
+                            <svg id="door-svg" class="door-svg" viewBox="0 0 80 100"
+                                 xmlns="http://www.w3.org/2000/svg" aria-label="Door state">
+                                <defs>
+                                    <clipPath id="door-clip">
+                                        <rect x="12" y="12" width="56" height="76"/>
+                                    </clipPath>
+                                </defs>
+                                <!-- Ground -->
+                                <rect x="0" y="88" width="80" height="12" rx="2" class="door-ground-fill"/>
+                                <!-- Posts -->
+                                <rect x="2"  y="8" width="10" height="80" rx="2" class="door-post"/>
+                                <rect x="68" y="8" width="10" height="80" rx="2" class="door-post"/>
+                                <!-- Top beam -->
+                                <rect x="2" y="2" width="76" height="10" rx="2" class="door-beam"/>
+                                <!-- Sliding panel (clipped to frame opening) -->
+                                <g clip-path="url(#door-clip)">
+                                    <g id="door-panel-group">
+                                        <rect x="12" y="12" width="56" height="76" rx="1" class="door-panel-fill"/>
+                                        <rect x="16" y="16" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="30" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="44" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="58" width="48" height="10" rx="1" class="door-slat"/>
+                                        <rect x="16" y="72" width="48" height="10" rx="1" class="door-slat"/>
+                                    </g>
+                                </g>
+                                <!-- Frame border overlay -->
+                                <rect x="12" y="12" width="56" height="76" rx="1" class="door-frame-border"/>
+                                <!-- Direction arrows (visible only during opening / closing) -->
+                                <!-- Up arrow: tip at (40,29), chevron wings at y=47, shaft to y=61 -->
+                                <polygon id="door-arrow-up"
+                                    points="40,29 53,47 46,47 46,61 34,61 34,47 27,47"/>
+                                <!-- Down arrow: tip at (40,71), chevron wings at y=53, shaft to y=39 -->
+                                <polygon id="door-arrow-down"
+                                    points="40,71 27,53 34,53 34,39 46,39 46,53 53,53"/>
+                            </svg>
+                            <div id="door-state-label" class="door-state-label">—</div>
+                            <div id="door-state-sub"   class="door-state-sub">connecting…</div>
+                        </div>
+
+                        <!-- Manual Actions -->
+                        <div class="action-buttons">
+                            <button class="btn-action open" onclick="sendOpenCommand()">
+                                <svg viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm5 0h4v-4H9v4zm5 0h4v-4h-4v4zM4 18h16v-2H4v2zM4 6v2h16V6H4z"/></svg>
+                                Open
+                            </button>
+                            <button class="btn-action stop" onclick="sendStopCommand()">
+                                <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                                Stop
+                            </button>
+                            <button class="btn-action close" onclick="sendCloseCommand()">
+                                <svg viewBox="0 0 24 24"><path d="M4 10h4v4H4v-4zm5 0h4v4H9v-4zm5 0h4v4h-4v-4zM4 16h16v2H4v-2zM4 6v2h16V6H4z"/></svg>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Auto Mode -->
+                    <div class="door-panel">
+                        <div class="auto-header">
+                            <h4>Auto Mode</h4>
+                            <div class="toggle" id="toggle" onclick="toggleSwitch()"></div>
+                        </div>
+
+                        <div id="auto_info" class="auto_info {% if auto_mode %} on{% endif %}" style="display: none;">
+                            <div class="auto-form">
+                                <form onsubmit="handleSubmit(event)">
+                                    <div class="auto-inline-row">
+                                        <label for="sunrise_offset">Open at sunrise +</label>
+                                        <div class="auto-input-group">
+                                            <input type="number" id="sunrise_offset" name="sunrise_offset" step="1" maxlength="4" value={{ sunrise_offset }} required>
+                                            <span style="font-size: 0.85rem; color: var(--text-muted);">min</span>
+                                        </div>
+                                    </div>
+                                    <div class="auto-inline-row">
+                                        <label for="sunset_offset">Close at sunset +</label>
+                                        <div class="auto-input-group">
+                                            <input type="number" id="sunset_offset" name="sunset_offset" step="1" maxlength="4" value={{ sunset_offset }} required>
+                                            <span style="font-size: 0.85rem; color: var(--text-muted);">min</span>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-open" type="submit" style="width: 100%; margin-top: 8px;">Save Offsets</button>
+                                </form>
+                            </div>
+
+                            <div class="auto-timetable">
+                                <div class="time-box">
+                                    <div class="time-box-label">🌅 Sunrise</div>
+                                    <div class="time-box-value" id="sunrise">--:--</div>
+                                </div>
+                                <div class="time-box">
+                                    <div class="time-box-label">🌇 Sunset</div>
+                                    <div class="time-box-value" id="sunset">--:--</div>
+                                </div>
+                                <div class="time-box">
+                                    <div class="time-box-label">🔓 Opens In</div>
+                                    <div class="time-box-value" id="tu_open">--</div>
+                                </div>
+                                <div class="time-box">
+                                    <div class="time-box-label">🔒 Closes In</div>
+                                    <div class="time-box-value" id="tu_close">--</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── System ── -->
+        <div id="card-system" class="card">
+            <div class="collapsible-header" onclick="toggleSection('system', this)">
+                <h3>🖥️ System</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="system" class="content-section">
+                <div class="sensor-row">
+                    <span class="sensor-label">Uptime</span>
+                    <span id="uptime" style="font-weight:600;"></span>
+                </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">CPU Temp</span>
+                    <div class="sensor-values">
+                        <span class="val-min"     id="cpu_temp_min"></span>
+                        <span class="val-current" id="cpu_temp"></span>
+                        <span class="val-max"     id="cpu_temp_max"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Temperature ── -->
+        <div id="card-temperature" class="card">
+            <div class="collapsible-header" onclick="toggleSection('temperature', this)">
+                <h3>🌡️ Temperature</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="temperature" class="content-section">
+                <div class="temp-grid">
+
+                    <!-- Inside -->
+                    <div class="temp-panel">
+                        <div class="temp-panel-header">
+                            <div class="temp-panel-title">Inside</div>
+                            <div class="temp-panel-sub">Min / Now / Max</div>
+                        </div>
+                        <div class="metric-grid">
+                            <div class="metric">
+                                <div class="metric-label">Temperature</div>
+                                <div class="metric-value">
+                                    <div class="current"><span id="temp_in"></span></div>
+                                    <div class="hint">°C</div>
+                                </div>
+                                <div class="metric-minmax">
+                                    <span class="chip chip-min">Min <span id="temp_in_min"></span></span>
+                                    <span class="chip chip-max">Max <span id="temp_in_max"></span></span>
+                                </div>
+                            </div>
+
+                            <div class="metric">
+                                <div class="metric-label">Humidity</div>
+                                <div class="metric-value">
+                                    <div class="current"><span id="hum_in"></span></div>
+                                    <div class="hint">%</div>
+                                </div>
+                                <div class="metric-minmax">
+                                    <span class="chip chip-min">Min <span id="hum_in_min"></span></span>
+                                    <span class="chip chip-max">Max <span id="hum_in_max"></span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Outside -->
+                    <div class="temp-panel">
+                        <div class="temp-panel-header">
+                            <div class="temp-panel-title">Outside</div>
+                            <div class="temp-panel-sub">Min / Now / Max</div>
+                        </div>
+                        <div class="metric-grid">
+                            <div class="metric">
+                                <div class="metric-label">Temperature</div>
+                                <div class="metric-value">
+                                    <div class="current"><span id="temp_out"></span></div>
+                                    <div class="hint">°C</div>
+                                </div>
+                                <div class="metric-minmax">
+                                    <span class="chip chip-min">Min <span id="temp_out_min"></span></span>
+                                    <span class="chip chip-max">Max <span id="temp_out_max"></span></span>
+                                </div>
+                            </div>
+
+                            <div class="metric">
+                                <div class="metric-label">Humidity</div>
+                                <div class="metric-value">
+                                    <div class="current"><span id="hum_out"></span></div>
+                                    <div class="hint">%</div>
+                                </div>
+                                <div class="metric-minmax">
+                                    <span class="chip chip-min">Min <span id="hum_out_min"></span></span>
+                                    <span class="chip chip-max">Max <span id="hum_out_max"></span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Location ── -->
+        <div id="card-location" class="card">
+            <div class="collapsible-header" onclick="toggleSection('location', this)">
+                <h3>📍 Location Settings</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="location" class="content-section">
+                
+                <form onsubmit="handleLocationSubmit(event)">
+                    <!-- Predefined Panel -->
+                    <div class="location-panel">
+                        <div class="location-panel-title">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                            Quick Select
+                        </div>
+                        <div class="form-row">
+                            <div class="input-with-icon">
+                                <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                                <select id="predefined-locations" class="select-full" onchange="populateLocationFields()">
+                                    <option value="" disabled selected>Search predefined locations...</option>
+                                    {% for loc in valid_locations %}
+                                    <option value="{{ loc.name }}"
+                                            data-region="{{ loc.region }}"
+                                            data-timezone="{{ loc.timezone }}"
+                                            data-latitude="{{ loc.latitude }}"
+                                            data-longitude="{{ loc.longitude }}">
+                                        {{ loc.name }} ({{ loc.region }}, {{ loc.timezone }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CSS specific to the Location divider and icons -->
+                    <style>
+                        .location-panel { background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+                        .location-panel-title { font-size: 0.95rem; font-weight: 800; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--text); text-transform: uppercase; letter-spacing: 0.05em; }
+                        .location-panel-title svg { width: 18px; height: 18px; fill: var(--accent); }
+                        .divider-text { display: flex; align-items: center; text-align: center; margin: 20px 0; color: var(--text-muted); font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; }
+                        .divider-text::before, .divider-text::after { content: ''; flex: 1; border-bottom: 1px solid var(--border); }
+                        .divider-text::before { margin-right: 12px; }
+                        .divider-text::after { margin-left: 12px; }
+                        .divider-text.collapsed .chevron { transform: rotate(-90deg); }
+                        .form-grid-2col { display: grid; grid-template-columns: 1fr; gap: 12px; }
+                        @media (min-width: 480px) { .form-grid-2col { grid-template-columns: 1fr 1fr; } }
+                        .input-with-icon { position: relative; display: flex; align-items: center; }
+                        .input-with-icon svg { position: absolute; left: 12px; width: 18px; height: 18px; fill: var(--text-muted); pointer-events: none; }
+                        .input-with-icon input, .input-with-icon select { padding-left: 38px !important; width: 100%; }
+                    </style>
+
+                    <!-- Divider acting as a collapsible button -->
+                    <div id="manual_divider" class="divider-text collapsed" onclick="toggleSection('manual_location_inputs', this)" style="cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity=0.7" onmouseout="this.style.opacity=1">
+                        <div style="display: flex; align-items: center;">
+                            Or Enter Manually
+                            <span class="chevron" style="margin-left: 8px; transition: transform 0.25s;">▼</span>
+                        </div>
+                    </div>
+
+                    <!-- Custom Panel (Hidden by default) -->
+                    <div id="manual_location_inputs" style="display: none;">
+                        <div class="location-panel">
+                            <div class="location-panel-title">
+                                <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                                Custom Coordinates
+                            </div>
+                            
+                            <div class="form-grid-2col">
+                                <div class="form-row">
+                                    <label for="city">City</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>
+                                        <input type="text" id="city" name="city" value="{{ location.city if location else '' }}" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <label for="region">Region</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
+                                        <input type="text" id="region" name="region" value="{{ location.region if location else '' }}" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <label for="latitude">Latitude</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                                        <input type="number" step="0.000001" id="latitude" name="latitude" value="{{ location.latitude if location else '' }}" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <label for="longitude">Longitude</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                                        <input type="number" step="0.000001" id="longitude" name="longitude" value="{{ location.longitude if location else '' }}" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row" style="grid-column: 1 / -1;">
+                                    <label for="timezone">Timezone</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                                        <input type="text" id="timezone" name="timezone" value="{{ location.timezone if location else '' }}" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Always-visible Save Button -->
+                    <button class="btn btn-open" type="submit" onclick="if(!this.form.checkValidity()) { document.getElementById('manual_location_inputs').style.display='block'; document.getElementById('manual_divider').classList.remove('collapsed'); }" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.05rem; padding: 12px;">
+                        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+                        Save Location
+                    </button>
+                </form>
+
+            </div>
+        </div>
+
+        <!-- ── Data Visualization ── -->
+        <div id="data_visualization_section" class="card">
+            <div class="collapsible-header" onclick="toggleSection('dataVisualizationSection', this)">
+                <h3>📊 Data Visualization</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="dataVisualizationSection" class="content-section">
+                <div style="margin-bottom: 12px;">
+                    <button class="btn btn-reference" onclick="socket.emit('get_csv_data')">Load Today's CSV Data</button>
+                </div>
+                <canvas id="dataChart" style="display: none;"></canvas>
+            </div>
+        </div>
+
+        <!-- ── Server Logs ── -->
+        <div id="card-logs" class="card">
+            <div class="collapsible-header" onclick="toggleSection('logSection', this)">
+                <h3>📋 Server Logs</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div id="logSection" class="content-section" style="padding: 12px;">
+                <div id="logs"></div>
+            </div>
+        </div>
+
+    </div><!-- /.container -->
+
+    <!-- ── Scripts ─────────────────────────────────────────── -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        /* ── Service Worker ────────────────────────── */
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then((registration) => {
+                console.log('[PWA] Service worker registered:', registration);
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    console.log('[PWA] New service worker detected:', newWorker);
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            showUpdateNotification(newWorker);
+                        }
+                    });
+                });
+            });
+        }
+
+        function showUpdateNotification(newWorker) {
+            const banner = document.createElement('div');
+            banner.id = 'updateBanner';
+            banner.style.cssText = 'position:fixed;bottom:12px;left:12px;right:12px;padding:12px 16px;background:#317EFB;color:#fff;text-align:center;border-radius:6px;z-index:200;';
+            banner.innerHTML = `A new version is available.
+                <button id="updateApp" style="margin-left:10px;padding:5px 10px;font-size:14px;border:none;border-radius:3px;cursor:pointer;background:#fff;color:#317EFB;">
+                    Update Now
+                </button>`;
+            document.body.appendChild(banner);
+            document.getElementById('updateApp').addEventListener('click', () => {
+                if (newWorker) newWorker.postMessage('skipWaiting');
+                window.location.reload();
+            });
+        }
+
+        /* ── Push Notifications ────────────────────── */
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+            navigator.serviceWorker.ready.then((registration) => {
+                console.log('[PWA] Service Worker ready for push notifications:', registration);
+                registration.pushManager.getSubscription().then((subscription) => {
+                    if (!subscription) {
+                        console.log('[PWA] No subscription found. Subscribing...');
+                        subscribeToPushNotifications(registration);
+                    } else {
+                        console.log('[PWA] Existing subscription:', subscription);
+                    }
+                });
+            });
+        }
+
+        function subscribeToPushNotifications(registration) {
+            const publicKey = "{{ vapid_public_key }}";
+            const applicationServerKey = urlBase64ToUint8Array(publicKey);
+            registration.pushManager
+                .subscribe({ userVisibleOnly: true, applicationServerKey })
+                .then((subscription) => {
+                    console.log('[PWA] Subscription successful:', subscription);
+                    return fetch('/subscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(subscription),
+                    });
+                })
+                .catch((error) => console.error('[PWA] Subscription failed:', error));
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+            return outputArray;
+        }
+
+        /* ── Socket.IO ─────────────────────────────── */
+        var socket = io();
+        let current_state = "";
+
+        socket.on('data', function(data) {
+            document.getElementById('temp_in').textContent      = data.temp_in;
+            document.getElementById('temp_in_min').textContent  = data.temp_in_min;
+            document.getElementById('temp_in_max').textContent  = data.temp_in_max;
+            document.getElementById('hum_in').textContent       = data.hum_in;
+            document.getElementById('hum_in_min').textContent   = data.hum_in_min;
+            document.getElementById('hum_in_max').textContent   = data.hum_in_max;
+            document.getElementById('temp_out').textContent     = data.temp_out;
+            document.getElementById('temp_out_min').textContent = data.temp_out_min;
+            document.getElementById('temp_out_max').textContent = data.temp_out_max;
+            document.getElementById('hum_out').textContent      = data.hum_out;
+            document.getElementById('hum_out_min').textContent  = data.hum_out_min;
+            document.getElementById('hum_out_max').textContent  = data.hum_out_max;
+            document.getElementById('cpu_temp').textContent     = data.cpu_temp;
+            document.getElementById('cpu_temp_min').textContent = data.cpu_temp_min;
+            document.getElementById('cpu_temp_max').textContent = data.cpu_temp_max;
+            document.getElementById('uptime').textContent       = data.uptime;
+            document.getElementById('sunrise').textContent      = data.sunrise;
+            document.getElementById('sunset').textContent       = data.sunset;
+            document.getElementById('tu_open').textContent      = data.tu_open;
+            document.getElementById('tu_close').textContent     = data.tu_close;
+
+            var reference = document.getElementById('reference_door_endstops_ms');
+            if (reference) reference.textContent = data.reference_door_endstops_ms;
+
+            var refDiv = document.getElementById('reference_buttons_div');
+            if (refDiv) refDiv.style.display = data.reference_door_endstops_ms !== "Not set" ? "none" : "block";
+
+            var isAutoMode = data.auto_mode === "True";
+            document.getElementById('auto_info').style.display = isAutoMode ? "block" : "none";
+            document.getElementById('toggle').classList.toggle('on', isAutoMode);
+
+            const doorSvg   = document.getElementById('door-svg');
+            const doorLabel = document.getElementById('door-state-label');
+            const doorSub   = document.getElementById('door-state-sub');
+
+            if (data.override !== "off") {
+                const state_key = data.state + "-" + data.override + ".switch";
+                if (current_state !== state_key) {
+                    doorSvg.setAttribute('class', 'door-svg state-' + data.state);
+                    doorLabel.textContent = data.override;
+                    doorSub.textContent   = 'Manual Override';
+                    current_state = state_key;
+                }
+            } else {
+                let isAuto   = (data.auto_mode === "True");
+                let modeText = isAuto ? "Auto Controlled" : "Manual Mode";
+                let state_key = data.state + "-" + isAuto;
+
+                if (current_state !== state_key) {
+                    doorSvg.setAttribute('class', 'door-svg state-' + data.state);
+                    doorLabel.textContent = data.state;
+                    doorSub.textContent   = modeText;
+                    current_state = state_key;
+                }
+            }
+
+
+            let error = data.errorstate;
+            document.getElementById('error_section').style.display = error ? "block" : "none";
+            if (error) document.getElementById('errorMessage').textContent = error;
+        });
+
+        socket.on('log', function(data) {
+            const logsDiv = document.getElementById('logs');
+            const newLog  = document.createElement('div');
+            newLog.textContent = data.message;
+            logsDiv.appendChild(newLog);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        });
+
+        socket.on('camera', function(data) {
+            const webcamFeed = document.getElementById('webcamFeed');
+            if (webcamFeed) {
+                webcamFeed.src = 'data:image/jpeg;base64,' + data;
+            } else {
+                console.error('Element with ID "webcamFeed" not found.');
+            }
+        });
+
+        /* ── Commands ──────────────────────────────── */
+        function sendOpenCommand()   { socket.emit('open'); }
+        function sendCloseCommand()  { socket.emit('close'); }
+        function sendStopCommand()   { socket.emit('stop'); }
+        function generateError()     { socket.emit('generate_error'); }
+        function clearErrorCommand() { socket.emit('clear_error'); }
+
+        function sendReferenceCommand() {
+            socket.emit('reference_endstops');
+            document.getElementById('reference_buttons_div').style.display = "none";
+        }
+
+        function toggleSwitch() {
+            const toggle = document.getElementById('toggle');
+            toggle.classList.toggle('on');
+            const isOn = toggle.classList.contains('on');
+            socket.emit('toggle', { toggle: isOn });
+            document.getElementById('auto_info').style.display = isOn ? 'block' : 'none';
+        }
+
+        function handleSubmit(event) {
+            event.preventDefault();
+            const sunrise_offset = document.getElementById('sunrise_offset').value;
+            const sunset_offset  = document.getElementById('sunset_offset').value;
+            socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
+            localStorage.setItem('sunrise_offset', sunrise_offset);
+            localStorage.setItem('sunset_offset',  sunset_offset);
+        }
+
+        /* ── CSV Chart ─────────────────────────────── */
+        socket.on('csv_data', function(data) {
+            console.log('Received CSV data:', data);
+            const dataChartItem = document.getElementById('dataChart');
+            dataChartItem.style.display = 'block';
+            const ctx = dataChartItem.getContext('2d');
+
+            function parseCSV(csvArray) {
+                const rows = csvArray.map(row => row.trim());
+                const headers = rows.shift().split(", ").map(h => h.trim().replace(/^#\s*/, ''));
+                const data = rows.map(row => {
+                    const values = row.split(", ").map(v => v.trim());
+                    return headers.reduce((obj, header, index) => {
+                        const numericValue = values[index].replace(/[^\d.-]/g, '');
+                        obj[header] = isNaN(numericValue) ? values[index] : parseFloat(numericValue);
+                        return obj;
+                    }, {});
+                });
+                return { headers, data };
+            }
+
+            const parsedData = parseCSV(data);
+            const labels = parsedData.data.map(row => row.time);
+            const datasets = parsedData.headers
+                .filter(h => h !== 'time' && parsedData.data.some(row => !isNaN(row[h])))
+                .map(h => ({
+                    label: h.replace(/_/g, ' '),
+                    data: parsedData.data.map(row => row[h]),
+                    borderColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
+                    fill: false
+                }));
+
+            if (window.myChart) window.myChart.destroy();
+
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Time' } },
+                        y: { display: true, title: { display: true, text: 'Values' } }
+                    }
+                }
+            });
+        });
+
+        /* ── Location ──────────────────────────────── */
+        function populateLocationFields() {
+            const dropdown = document.getElementById('predefined-locations');
+            const opt = dropdown.options[dropdown.selectedIndex];
+            if (opt) {
+                document.getElementById('city').value      = opt.value;
+                document.getElementById('region').value    = opt.getAttribute('data-region');
+                document.getElementById('timezone').value  = opt.getAttribute('data-timezone');
+                document.getElementById('latitude').value  = opt.getAttribute('data-latitude');
+                document.getElementById('longitude').value = opt.getAttribute('data-longitude');
+            }
+        }
+
+        function handleLocationSubmit(event) {
+            event.preventDefault();
+            const city      = document.getElementById('city').value;
+            const region    = document.getElementById('region').value;
+            const timezone  = document.getElementById('timezone').value;
+            const latitude  = parseFloat(document.getElementById('latitude').value);
+            const longitude = parseFloat(document.getElementById('longitude').value);
+            socket.emit('update_location', { city, region, timezone, latitude, longitude });
+        }
+
+        /* ── Collapsibles ──────────────────────────── */
+        const COLLAPSIBLE_IDS = [
+            'errorSection', 'webcam_section', 'door_control',
+            'system', 'temperature', 'location', 'manual_location_inputs',
+            'dataVisualizationSection', 'logSection'
+        ];
+
+        function toggleSection(id, headerEl) {
+            const section  = document.getElementById(id);
+            const isHidden = section.style.display === "none";
+            section.style.display = isHidden ? "block" : "none";
+            if (headerEl) headerEl.classList.toggle('collapsed', !isHidden);
+            localStorage.setItem('section-' + id, isHidden ? 'open' : 'closed');
+        }
+
+        // Restore saved collapse states (default: open)
+        COLLAPSIBLE_IDS.forEach(id => {
+            const section = document.getElementById(id);
+            if (!section) return;
+            const saved  = localStorage.getItem('section-' + id);
+            const header = section.previousElementSibling;
+            const hasHeader = header && header.classList.contains('collapsible-header');
+            if (saved === 'closed') {
+                section.style.display = "none";
+                if (hasHeader) header.classList.add('collapsed');
+            } else {
+                section.style.display = "block";
+                if (hasHeader) header.classList.remove('collapsed');
+            }
+        });
+
+        /* ── Modal ─────────────────────────────────── */
+        function openModal(additionalText = "") {
+            const modal     = document.getElementById("myModal");
+            const modalBody = document.getElementById("modal-body");
+            fetch('static/offline.html')
+                .then(r => r.text())
+                .then(data => {
+                    modalBody.innerHTML = data;
+                    modal.classList.add('active');
+                    if (additionalText) {
+                        document.getElementById("modal-message").textContent =
+                            "\nError for developer:\n" + additionalText;
+                    }
+                })
+                .catch(err => console.error('Error loading offline.html:', err));
+        }
+
+        function closeModal() {
+            document.getElementById("myModal").classList.remove('active');
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById("myModal");
+            if (event.target === modal) closeModal();
+        };
+
+        /* ── Update ────────────────────────────────── */
+        function triggerUpdate() {
+            if (confirm("Are you sure you want to update the application? This will restart the service.")) {
+                fetch('/update', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        alert("Update started. The page will reload in 15 seconds.");
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 15000);
+                    })
+                    .catch(err => {
+                        console.error("Error triggering update:", err);
+                        alert("Failed to trigger update.");
+                    });
+            }
+        }
+
+        /* ── Init ──────────────────────────────────── */
+        document.addEventListener('DOMContentLoaded', function() {
+            socket.on('connect_error', function(error) {
+                console.error('Failed to connect to server:', error);
+                openModal("Socket IO Connect error: " + (error.message || 'Unknown error'));
+            });
+
+            socket.on('connect', function() { closeModal(); });
+
+            const themeButton   = document.getElementById('toggleTheme');
+            const currentTheme  = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', currentTheme);
+            themeButton.textContent = currentTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+
+            const savedSunrise = localStorage.getItem('sunrise_offset');
+            const savedSunset  = localStorage.getItem('sunset_offset');
+            if (savedSunrise !== null) document.getElementById('sunrise_offset').value = savedSunrise;
+            if (savedSunset  !== null) document.getElementById('sunset_offset').value  = savedSunset;
+
+            themeButton.addEventListener('click', () => {
+                const cur  = document.documentElement.getAttribute('data-theme');
+                const next = cur === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('theme', next);
+                themeButton.textContent = next === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+            });
+            fetch('/version')
+                .then(r => r.json())
+                .then(data => {
+                    const title = document.getElementById('pageTitle');
+                    if (title) title.dataset.tooltip = 'commit: ' + data.version;
+                })
+                .catch(() => {});
+        });
+
+        /* ── PWA Install ───────────────────────────── */
+        let deferredPrompt;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('[PWA] beforeinstallprompt event triggered');
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('installBanner').style.display = 'block';
+        });
+
+        document.getElementById('installButton').addEventListener('click', () => {
+            console.log('[PWA] Install button clicked');
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    console.log('[PWA] User choice:', choiceResult.outcome);
+                    deferredPrompt = null;
+                });
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] App was installed');
+            const banner = document.getElementById('installBanner');
+            if (banner) banner.style.display = 'none';
+        });
+    </script>
+</body>
+</html>

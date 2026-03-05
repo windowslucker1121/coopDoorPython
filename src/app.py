@@ -667,7 +667,7 @@ def handle_mock_get_outputs():
 def index():
     # Render the template with temperature and humidity values
     return render_template(
-        'index_optimized_door.html',
+        'grid_dashboard.html',
         auto_mode=global_vars.instance().get_value("auto_mode"),
         sunrise_offset=global_vars.instance().get_value("sunrise_offset"),
         sunset_offset=global_vars.instance().get_value("sunset_offset"),
