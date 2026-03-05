@@ -46,7 +46,6 @@ class DOOR():
         self.override = False
         self.errorState = None
         self.reference_door_endstops_ms = None
-        self.reference_door_close_ms = None  # open→closed travel time (used for premature detection)
         self.reference_door_active = False
         self.startedMovingTime = None
         self.timeOutWindowClosingDoor = 0.5
@@ -115,7 +114,7 @@ class DOOR():
             self.reference_door_active = False
             return False
         logger.debug("Setting motor to close...")
-        close_start_time = time.time()  # measure open→closed travel time
+        
         self.close()
         validEndstop = False
         while not validEndstop:
@@ -136,10 +135,7 @@ class DOOR():
 
         self.stop(state="closed")
         logger.debug("Endstop hit, stopping motor")
-        close_end_time = time.time()
-        self.reference_door_close_ms = (close_end_time - close_start_time) * 1000
-        logger.info("Referenced close travel time: %.0f ms", self.reference_door_close_ms)
-        start_time = close_end_time  # reuse for the open-direction timing below
+        start_time = time.time()
 
         logger.debug("Referencing - move door to OPEN position.")
         # Move to open end stop
@@ -175,13 +171,9 @@ class DOOR():
         self.stop(state="open")
 
         # Set the reference_endstops_set variable
-        self.reference_door_endstops_ms = time_taken_ms  # closed→open (used for motor budget timeout)
+        self.reference_door_endstops_ms = time_taken_ms
         self.reference_door_active = False
-        logger.info(
-            "Referenced endstops: close=%.0f ms, open=%.0f ms",
-            self.reference_door_close_ms,
-            time_taken_ms,
-        )
+        logger.info("Referenced endstops in " + str(time_taken_ms) + "ms")
         return True
 
     #endstop is hit, stop the motor
