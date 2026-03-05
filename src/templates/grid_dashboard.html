@@ -1014,9 +1014,267 @@
             width: 100%;
         }
 
+        /* ── Log Viewer Modal ───────────────────────────────── */
+        .logviewer-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .logviewer-btn:hover { opacity: 0.85; }
+
+        #logViewerModal { z-index: 200; align-items: flex-start; padding-top: 20px; }
+
+        .logviewer-content {
+            background: var(--surface);
+            color: var(--text);
+            border-radius: var(--radius);
+            padding: 0;
+            width: 100%;
+            max-width: 1200px;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+            overflow: hidden;
+        }
+
+        .logviewer-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: var(--surface-alt);
+            border-bottom: 1px solid var(--border);
+            border-radius: var(--radius) var(--radius) 0 0;
+            flex-shrink: 0;
+        }
+
+        .logviewer-title {
+            font-size: 1rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .logviewer-file-select {
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.85rem;
+            min-width: 200px;
+            max-width: 300px;
+        }
+
+        .logviewer-search {
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.85rem;
+            flex: 1;
+            min-width: 130px;
+        }
+
+        .logviewer-search:focus,
+        .logviewer-file-select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(49,126,251,0.15);
+        }
+
+        .lv-level-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+
+        .lv-level-btn {
+            padding: 3px 9px;
+            border-radius: 999px;
+            border: 1px solid;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            opacity: 0.38;
+            transition: opacity 0.15s;
+        }
+        .lv-level-btn.active { opacity: 1; }
+
+        .lv-chip-ALL      { color: var(--text-muted); background: var(--surface-alt);        border-color: var(--border); }
+        .lv-chip-DEBUG    { color: #888;              background: rgba(136,136,136,0.10);    border-color: rgba(136,136,136,0.35); }
+        .lv-chip-INFO     { color: #317EFB;           background: rgba(49,126,251,0.10);     border-color: rgba(49,126,251,0.35); }
+        .lv-chip-WARNING  { color: #c87000;           background: rgba(224,128,0,0.10);      border-color: rgba(224,128,0,0.40); }
+        .lv-chip-ERROR    { color: #d44;              background: rgba(224,85,85,0.10);      border-color: rgba(224,85,85,0.40); }
+        .lv-chip-CRITICAL { color: #fff;              background: #c0392b;                   border-color: #a93226; }
+
+        .lv-sort-btn, .lv-refresh-btn {
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .lv-sort-btn:hover, .lv-refresh-btn:hover { background: var(--surface-hover); }
+        .lv-refresh-btn.on { background: var(--btn-open); color: #fff; border-color: var(--btn-open); }
+
+        .lv-close-btn {
+            margin-left: auto;
+            background: none;
+            border: none;
+            font-size: 1.7rem;
+            line-height: 1;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 0 4px;
+            flex-shrink: 0;
+        }
+        .lv-close-btn:hover { color: var(--text); }
+
+        .logviewer-statusbar {
+            padding: 6px 16px;
+            background: var(--surface-alt);
+            border-top: 1px solid var(--border);
+            font-size: 0.77rem;
+            color: var(--text-muted);
+            border-radius: 0 0 var(--radius) var(--radius);
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .logviewer-body {
+            flex: 1;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.79rem;
+            line-height: 1.5;
+        }
+
+        .lv-line {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            padding: 3px 12px;
+            align-items: flex-start;
+            word-break: break-word;
+        }
+        .lv-line:last-child { border-bottom: none; }
+        .lv-line:hover { background: var(--surface-hover); }
+
+        .lv-ts {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            margin-right: 10px;
+            font-size: 0.74rem;
+            padding-top: 2px;
+            min-width: 162px;
+            user-select: text;
+        }
+
+        .lv-lv {
+            font-weight: 700;
+            margin-right: 10px;
+            flex-shrink: 0;
+            min-width: 56px;
+            font-size: 0.7rem;
+            text-align: center;
+            padding: 2px 6px;
+            border-radius: 4px;
+            line-height: 1.4;
+            align-self: flex-start;
+        }
+
+        .lv-lg {
+            color: var(--text-muted);
+            margin-right: 10px;
+            flex-shrink: 0;
+            min-width: 100px;
+            max-width: 170px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.72rem;
+            padding-top: 2px;
+        }
+
+        .lv-msg { flex: 1; color: var(--text); user-select: text; }
+
+        .lv-line.level-DEBUG    .lv-lv { background: rgba(136,136,136,0.14); color: #888; }
+        .lv-line.level-INFO     .lv-lv { background: rgba(49,126,251,0.14);  color: #317EFB; }
+        .lv-line.level-WARNING  .lv-lv { background: rgba(224,128,0,0.15);   color: #c87000; }
+        .lv-line.level-ERROR    .lv-lv { background: rgba(224,85,85,0.18);   color: #d44; }
+        .lv-line.level-CRITICAL .lv-lv { background: #c0392b; color: #fff; }
+        .lv-line.level-WARNING  .lv-msg { color: #c87000; }
+        .lv-line.level-ERROR    .lv-msg { color: #d44; }
+        .lv-line.level-CRITICAL .lv-msg { color: #e74c3c; font-weight: 700; }
+        .lv-line.level-CRITICAL { background: rgba(192,57,43,0.06); }
+
+        .lv-empty {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 48px 24px;
+            font-size: 0.9rem;
+            font-family: sans-serif;
+        }
+
+        @media (max-width: 600px) {
+            .lv-ts { min-width: 85px; font-size: 0.68rem; }
+            .lv-lg { display: none; }
+            .logviewer-file-select { min-width: 120px; }
+            #logViewerModal { padding: 8px; }
+        }
+
     </style>
 </head>
 <body>
+
+    <!-- Log Viewer Modal -->
+    <div id="logViewerModal" class="modal">
+        <div class="logviewer-content">
+            <!-- Toolbar -->
+            <div class="logviewer-toolbar">
+                <span class="logviewer-title">📜 Log Viewer</span>
+                <select class="logviewer-file-select" id="lv-file-select" onchange="lvLoadFile()">
+                    <option value="">— select a log file —</option>
+                </select>
+                <input class="logviewer-search" id="lv-search" type="text" placeholder="🔍 Search…" oninput="lvRender()">
+                <div class="lv-level-filters" id="lv-level-filters">
+                    <button class="lv-level-btn lv-chip-ALL active"      data-level="ALL"      onclick="lvToggleLevel(this)">ALL</button>
+                    <button class="lv-level-btn lv-chip-DEBUG"           data-level="DEBUG"    onclick="lvToggleLevel(this)">DEBUG</button>
+                    <button class="lv-level-btn lv-chip-INFO"            data-level="INFO"     onclick="lvToggleLevel(this)">INFO</button>
+                    <button class="lv-level-btn lv-chip-WARNING"         data-level="WARNING"  onclick="lvToggleLevel(this)">WARN</button>
+                    <button class="lv-level-btn lv-chip-ERROR"           data-level="ERROR"    onclick="lvToggleLevel(this)">ERROR</button>
+                    <button class="lv-level-btn lv-chip-CRITICAL"        data-level="CRITICAL" onclick="lvToggleLevel(this)">CRIT</button>
+                </div>
+                <button class="lv-sort-btn" id="lv-sort-btn" onclick="lvToggleSort()">⬇ Newest first</button>
+                <button class="lv-refresh-btn" id="lv-auto-refresh" onclick="lvToggleAutoRefresh()">↻ Auto-refresh</button>
+                <button class="lv-close-btn" onclick="closeLV()" title="Close">&times;</button>
+            </div>
+            <!-- Lines -->
+            <div class="logviewer-body" id="lv-body">
+                <div class="lv-empty">Select a log file to begin.</div>
+            </div>
+            <!-- Status bar -->
+            <div class="logviewer-statusbar">
+                <span id="lv-stat-file">No file loaded</span>
+                <span id="lv-stat-count"></span>
+                <span id="lv-stat-filter"></span>
+            </div>
+        </div>
+    </div>
 
     <!-- Offline modal -->
     <div id="myModal" class="modal">
@@ -1041,6 +1299,9 @@
             <div class="mock-tooltip">Deactivated — real hardware in use</div>
         </div>
         {% endif %}
+
+        <!-- Log Viewer button -->
+        <button class="logviewer-btn" onclick="openLV()">📜 Logs</button>
 
         <!-- Update button -->
         <button class="update-btn" id="updateApp" onclick="triggerUpdate()">🔄 Update</button>
@@ -1879,6 +2140,180 @@
             const banner = document.getElementById('installBanner');
             if (banner) banner.style.display = 'none';
         });
+
+        /* ── Log Viewer ─────────────────────────────────────── */
+        let _lv_allLines    = [];
+        let _lv_activeLevel = 'ALL';
+        let _lv_sortDesc    = true;
+        let _lv_autoInter   = null;
+        let _lv_curFile     = '';
+
+        function openLV() {
+            document.getElementById('logViewerModal').classList.add('active');
+            lvFetchFileList();
+        }
+
+        function closeLV() {
+            document.getElementById('logViewerModal').classList.remove('active');
+            lvStopAutoRefresh();
+        }
+
+        document.getElementById('logViewerModal').addEventListener('click', function(e) {
+            if (e.target === this) closeLV();
+        });
+
+        async function lvFetchFileList() {
+            try {
+                const res   = await fetch('/api/logs');
+                const files = await res.json();
+                const sel   = document.getElementById('lv-file-select');
+                const prev  = sel.value;
+                sel.innerHTML = '<option value="">\u2014 select a log file \u2014</option>';
+                files.forEach(f => {
+                    const opt = document.createElement('option');
+                    opt.value = f.name;
+                    const kb  = (f.size / 1024).toFixed(1);
+                    opt.textContent = f.name + '  (' + kb + ' KB)';
+                    sel.appendChild(opt);
+                });
+                if (prev && [...sel.options].some(o => o.value === prev)) {
+                    sel.value = prev;
+                } else if (files.length > 0 && !_lv_curFile) {
+                    sel.value = files[0].name;
+                    await lvLoadFile();
+                }
+            } catch(err) { console.error('[LV] file list error', err); }
+        }
+
+        async function lvLoadFile() {
+            const sel      = document.getElementById('lv-file-select');
+            const filename = sel.value;
+            if (!filename) return;
+            _lv_curFile = filename;
+            try {
+                const res  = await fetch('/api/logs/' + encodeURIComponent(filename));
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                _lv_allLines = data;
+                document.getElementById('lv-stat-file').textContent  = filename;
+                document.getElementById('lv-stat-count').textContent = data.length + ' lines total';
+                lvRender();
+            } catch(err) {
+                document.getElementById('lv-body').innerHTML =
+                    '<div class="lv-empty">⚠️ Error: ' + lvEsc(err.message) + '</div>';
+            }
+        }
+
+        function lvToggleLevel(btn) {
+            const level = btn.dataset.level;
+            const all   = [...document.querySelectorAll('.lv-level-btn')];
+            if (level === 'ALL') {
+                all.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                _lv_activeLevel = 'ALL';
+            } else {
+                all.find(b => b.dataset.level === 'ALL').classList.remove('active');
+                btn.classList.toggle('active');
+                const active = all.filter(b => b.dataset.level !== 'ALL' && b.classList.contains('active'));
+                if (active.length === 0) {
+                    all.find(b => b.dataset.level === 'ALL').classList.add('active');
+                    _lv_activeLevel = 'ALL';
+                } else {
+                    _lv_activeLevel = active.map(b => b.dataset.level);
+                }
+            }
+            lvRender();
+        }
+
+        function lvToggleSort() {
+            _lv_sortDesc = !_lv_sortDesc;
+            const btn = document.getElementById('lv-sort-btn');
+            btn.textContent = _lv_sortDesc ? '\u2193 Newest first' : '\u2191 Oldest first';
+            lvRender();
+        }
+
+        function lvToggleAutoRefresh() {
+            const btn = document.getElementById('lv-auto-refresh');
+            if (_lv_autoInter) {
+                lvStopAutoRefresh();
+            } else {
+                btn.classList.add('on');
+                btn.textContent = '\u21bb Refreshing\u2026';
+                _lv_autoInter = setInterval(() => { if (_lv_curFile) lvLoadFile(); }, 3000);
+            }
+        }
+
+        function lvStopAutoRefresh() {
+            if (_lv_autoInter) { clearInterval(_lv_autoInter); _lv_autoInter = null; }
+            const btn = document.getElementById('lv-auto-refresh');
+            if (btn) { btn.classList.remove('on'); btn.textContent = '\u21bb Auto-refresh'; }
+        }
+
+        function lvRender() {
+            const needle = (document.getElementById('lv-search').value || '').toLowerCase();
+            const body   = document.getElementById('lv-body');
+            const statEl = document.getElementById('lv-stat-filter');
+
+            let lines = _lv_allLines.filter(ln => {
+                if (_lv_activeLevel !== 'ALL') {
+                    const lvs = Array.isArray(_lv_activeLevel) ? _lv_activeLevel : [_lv_activeLevel];
+                    if (!lvs.includes(ln.lv)) return false;
+                }
+                if (needle) {
+                    if (!(ln.t + ln.lg + ln.lv + ln.m).toLowerCase().includes(needle)) return false;
+                }
+                return true;
+            });
+
+            statEl.textContent = lines.length !== _lv_allLines.length
+                ? 'Showing ' + lines.length + ' of ' + _lv_allLines.length + ' lines'
+                : '';
+
+            if (_lv_sortDesc) lines = lines.slice().reverse();
+
+            if (lines.length === 0) {
+                body.innerHTML = '<div class="lv-empty">No matching log entries.</div>';
+                return;
+            }
+
+            const LIMIT   = 2000;
+            const visible = lines.slice(0, LIMIT);
+            const extra   = lines.length > LIMIT ? lines.length - LIMIT : 0;
+
+            const html = visible.map(ln => {
+                const cls = 'lv-line level-' + ln.lv;
+                const ts  = lvEsc(ln.t);
+                const lv  = lvEsc(ln.lv || '?');
+                const lg  = lvEsc(ln.lg);
+                const msg = needle ? lvHiHtml(ln.m, needle) : lvEsc(ln.m);
+                return '<div class="' + cls + '"><span class="lv-ts">' + ts +
+                    '</span><span class="lv-lv">' + lv +
+                    '</span><span class="lv-lg" title="' + lvEsc(ln.lg) + '">' + lg +
+                    '</span><span class="lv-msg">' + msg + '</span></div>';
+            }).join('');
+
+            body.innerHTML = html + (extra > 0
+                ? '<div class="lv-empty">&hellip; and ' + extra +
+                  ' more lines \u2014 narrow your filter or search to see more.</div>'
+                : '');
+
+            if (!_lv_sortDesc) body.scrollTop = body.scrollHeight;
+        }
+
+        function lvEsc(s) {
+            if (!s) return '';
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function lvHiHtml(str, needle) {
+            if (!needle || !str) return lvEsc(str);
+            const re = new RegExp('(' + needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
+            return str.split(re).map((p, i) =>
+                i % 2 === 1
+                    ? '<mark style="background:#ffe000;color:#000;border-radius:2px;">' + lvEsc(p) + '</mark>'
+                    : lvEsc(p)
+            ).join('');
+        }
     </script>
 </body>
 </html>

@@ -21,6 +21,8 @@ import ruamel.yaml as YAML
 import os.path
 from collections import deque
 import logging
+from logging.handlers import RotatingFileHandler
+import glob
 import sys
 from camera import Camera
 import base64
@@ -736,6 +738,70 @@ def get_version():
         commit_hash = 'unknown'
     return jsonify({'version': commit_hash})
 
+# ── Log Viewer API ────────────────────────────────────────────────────────────
+
+@app.route('/api/logs')
+def api_log_files():
+    """Return list of available app log files, newest first."""
+    log_dir = os.path.join(root_path, "log")
+    files = []
+    if os.path.isdir(log_dir):
+        for f in sorted(os.listdir(log_dir), reverse=True):
+            if f.endswith('.log'):
+                full_path = os.path.join(log_dir, f)
+                try:
+                    stat = os.stat(full_path)
+                    files.append({
+                        'name': f,
+                        'size': stat.st_size,
+                        'modified': stat.st_mtime
+                    })
+                except OSError:
+                    pass
+    return jsonify(files)
+
+
+@app.route('/api/logs/<path:filename>')
+def api_log_content(filename):
+    """Return parsed lines of a single app log file."""
+    # Sanitize: strip any directory traversal
+    filename = os.path.basename(filename)
+    if not filename.endswith('.log'):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    log_dir = os.path.join(root_path, "log")
+    log_path = os.path.join(log_dir, filename)
+    if not os.path.isfile(log_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    lines = []
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+            for raw_line in f:
+                line = raw_line.rstrip('\n')
+                if not line:
+                    continue
+                # Expected format: TIMESTAMP - LOGGER - LEVEL - MESSAGE
+                parts = line.split(' - ', 3)
+                if len(parts) == 4:
+                    lines.append({
+                        't': parts[0],
+                        'lg': parts[1],
+                        'lv': parts[2].strip().upper(),
+                        'm': parts[3]
+                    })
+                else:
+                    lines.append({
+                        't': '',
+                        'lg': '',
+                        'lv': 'RAW',
+                        'm': line
+                    })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify(lines)
+
 @app.route('/update', methods=['POST'])
 def update_app():
     import subprocess
@@ -784,8 +850,15 @@ def exitHandler(stdout,stderr):
     logger.info("Exiting Coop Controller")
 
 def configure_logging():
-    """Configure the logging system."""
-    logging.basicConfig(level=logging.DEBUG) 
+    """Configure the logging system.
+
+    Always writes to a rotating log file in log/ named app_YYYYMMDD_HHMMSS.log
+    (timestamp taken at boot).  The file rotates automatically when it reaches
+    500 MB (up to 4 backup copies, so 5 files total within one session).  Before
+    creating the new file, old base log files are pruned so that at most 5 base
+    files (and their rotated copies) exist at any one time.
+    """
+    logging.basicConfig(level=logging.DEBUG)
     # Define the log format
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -794,26 +867,62 @@ def configure_logging():
     rootLogger.setLevel(logging.DEBUG)
 
     # Add SocketIO logging handler
-    socketio_handler = SocketIOHandler()  # Assume this handler is already defined
+    socketio_handler = SocketIOHandler()
     socketio_handler.setFormatter(formatter)
     if not any(isinstance(h, SocketIOHandler) for h in rootLogger.handlers):
         rootLogger.addHandler(socketio_handler)
 
     # Add StreamHandler to print logs to the console
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)  # Explicitly set the same formatter
+    console_handler.setFormatter(formatter)
     if not any(isinstance(h, logging.StreamHandler) for h in rootLogger.handlers):
         rootLogger.addHandler(console_handler)
 
-    if global_vars.instance().get_value("consoleLogToFile"):
-        file_handler = logging.FileHandler("log.txt", mode='w')
-        file_handler.setFormatter(formatter)
-        if not any(isinstance(h, logging.FileHandler) for h in rootLogger.handlers):
-            rootLogger.addHandler(file_handler)
+    # ------------------------------------------------------------------ #
+    # Always-on rotating file handler (boot-timestamped, 500 MB / 5 files)
+    # ------------------------------------------------------------------ #
+    log_dir = os.path.join(root_path, "log")
+    os.makedirs(log_dir, exist_ok=True)
+
+    MAX_LOG_FILES = 5  # maximum number of base log files to keep across sessions
+
+    # Collect all existing base log files for this app and sort oldest-first.
+    existing_base_logs = sorted(
+        glob.glob(os.path.join(log_dir, "app_*.log")),
+        key=os.path.getmtime
+    )
+
+    # Remove oldest base files (and their rotated siblings) so that adding the
+    # new file keeps the total at or below MAX_LOG_FILES.
+    while len(existing_base_logs) >= MAX_LOG_FILES:
+        oldest = existing_base_logs.pop(0)
+        try:
+            os.remove(oldest)
+        except OSError:
+            pass
+        # Remove rotated copies (.1, .2, …) created by RotatingFileHandler.
+        for rotated in glob.glob(oldest + ".*"):
+            try:
+                os.remove(rotated)
+            except OSError:
+                pass
+
+    # Create a new log file whose name encodes the current boot time.
+    boot_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = os.path.join(log_dir, f"app_{boot_timestamp}.log")
+
+    rotating_file_handler = RotatingFileHandler(
+        log_filename,
+        maxBytes=500 * 1024 * 1024,  # 500 MB per file
+        backupCount=4                  # 4 rotated copies + 1 active = 5 files max
+    )
+    rotating_file_handler.setFormatter(formatter)
+    if not any(isinstance(h, RotatingFileHandler) for h in rootLogger.handlers):
+        rootLogger.addHandler(rotating_file_handler)
 
     # Set the log level for the geventwebsocket handler because it is too verbose
-    logger = logging.getLogger("geventwebsocket.handler")
-    logger.setLevel(logging.WARNING)
+    gws_logger = logging.getLogger("geventwebsocket.handler")
+    gws_logger.setLevel(logging.WARNING)
 
     return rootLogger
 
