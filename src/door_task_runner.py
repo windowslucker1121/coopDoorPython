@@ -71,6 +71,7 @@ class DoorTaskRunner:
         # drive block can run even if the lower endstop is still physically active
         # (door_state == d_door_state == "closed" but motor never ran).
         self._close_retry_just_fired = False
+        self.PREMATURE_CLOSE_MAX_RETRIES = 5
 
     # ------------------------------------------------------------------
     # Public API
@@ -241,22 +242,16 @@ class DoorTaskRunner:
                         ref_close_s,
                         self.auto_close_premature_count,
                     )
-                    if self.auto_close_premature_count >= 3:
-                        logger.critical(
-                            "Auto-close blocked 3 times by premature lower endstop "
-                            "— entering error state."
+                    if self.auto_close_premature_count >= self.PREMATURE_CLOSE_MAX_RETRIES:
+                        error_msg = (
+                            f"Auto-close failed: lower endstop triggered prematurely "
+                            f"{self.auto_close_premature_count} times in a row."
+                            f"(Max {self.PREMATURE_CLOSE_MAX_RETRIES} times)"
                         )
-                        door.ErrorState(
-                            "Auto-close: lower endstop triggered prematurely 3 times "
-                            "in a row (chicken in doorway?)",
-                            stopDoor=True,
-                        )
+                        logger.critical(error_msg)
+                        door.ErrorState(error_msg, stopDoor=True)
                         global_vars.instance().set_value("desired_door_state", "stopped")
-                        self._send_notification(
-                            "Door Error",
-                            "Auto-close failed: lower endstop triggered prematurely "
-                            "3 times. Please check the coop.",
-                        )
+                        self._send_notification("Door Error", error_msg)
                         self.auto_close_premature_count = 0
                         self.auto_close_retry_pending = False
                         self.auto_close_retry_time = None
@@ -277,8 +272,9 @@ class DoorTaskRunner:
                         self.auto_close_retry_time = time.time() + 5.0
                         self._close_retry_just_fired = False
                         logger.info(
-                            "Auto-close retry scheduled in 5 s (attempt %d/3).",
+                            "Auto-close retry scheduled in 5 s (attempt %d/%d).",
                             self.auto_close_premature_count,
+                            self.PREMATURE_CLOSE_MAX_RETRIES,
                         )
                 else:
                     # Endstop triggered at the expected time — genuine close.
@@ -312,6 +308,11 @@ class DoorTaskRunner:
                 global_vars.instance().set_value("desired_door_state", "closed")
                 # Re-read so this iteration's logic sees the updated desired state.
                 d_door_state = "closed"
+                # Keep last_d_door_state in sync so the next iteration's
+                # "d_door_state != last_d_door_state" check does NOT fire and
+                # reset door_move_count back to 0 (which would defeat the motor
+                # budget timeout on every retry).
+                self.last_d_door_state = "closed"
 
             # Reset retry state whenever we leave auto mode or enter override.
             if not auto_mode or self.door_override:

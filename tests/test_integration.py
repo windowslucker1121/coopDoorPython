@@ -16,10 +16,13 @@ Premature lower-endstop detection (auto-close safety)
   4. First premature trigger — motor stops, retry scheduled within 5 s.
   5. Retry fires after cooldown — close command re-issued.
   6. Two consecutive premature triggers — counter reaches 2, no error yet.
-  7. Three consecutive premature triggers — error state + push notification.
+  7. PREMATURE_CLOSE_MAX_RETRIES consecutive premature triggers — error state + push notification.
   8. Valid (full-travel) close — premature counter reset to 0.
   9. Manual mode — no premature detection even with fast endstop.
  10. Auto mode disabled mid-cycle — retry state fully cleared.
+ 11. Lingering endstop releases before retry — retry succeeds.
+ 12. Endstop still active at retry time — stuck-state regression.
+ 13. door_move_count not reset after retry — motor budget accumulates correctly.
 
 Error state management
  11. ``clear_error_state`` flag clears door error and retry counters.
@@ -360,17 +363,27 @@ class TestPrematureEndstop:
     # ── three triggers → error ───────────────────────────────────────────────
 
     def test_three_triggers_enter_error_state_with_notification(self):
-        """Three consecutive premature triggers → error state + one notification."""
-        door, runner, notifications = self._setup()
+        """Consecutive premature triggers → error state + one notification.
 
-        for _ in range(2):
+        The error fires after ``PREMATURE_CLOSE_MAX_RETRIES`` consecutive
+        triggers (currently 5).  The test uses the runner's own constant so
+        it stays valid if the threshold is tuned in the future.
+        """
+        door, runner, notifications = self._setup()
+        max_retries = runner.PREMATURE_CLOSE_MAX_RETRIES
+
+        for _ in range(max_retries - 1):
             _run_premature_cycle(runner, door)
+            assert door.ErrorState() is False, (
+                f"Error state set too early at count "
+                f"{runner.auto_close_premature_count}"
+            )
             # Expire cooldown so the door can start closing again
             runner.auto_close_retry_time = time.time() - 0.1
             runner.step()
             assert global_vars.instance().get_value("desired_door_state") == "closed"
 
-        # Third (fatal) trigger
+        # Fatal (max_retries-th) trigger
         _run_premature_cycle(runner, door)
 
         assert door.ErrorState() is True
@@ -538,6 +551,47 @@ class TestPrematureEndstop:
 
         # Release endstop so subsequent test teardown is clean
         _release_lower()
+
+    # ── move-count not reset after retry ─────────────────────────────────────
+
+    def test_door_move_count_not_reset_after_retry(self):
+        """Regression: door_move_count must accumulate across iterations after a
+        retry fires, not reset to 0 each time.
+
+        Root cause: when the retry fired, only the local ``d_door_state`` was
+        updated to "closed" but ``last_d_door_state`` was left as "stopped".
+        In the next iteration the differ check reset ``door_move_count`` to 0,
+        meaning the motor budget timeout never advanced and a stuck door would
+        never trigger an error.
+
+        Fix: the retry block now also sets ``self.last_d_door_state = "closed"``.
+        """
+        door, runner, _ = self._setup()
+
+        # ── trigger one premature close ───────────────────────────────────────
+        _run_premature_cycle(runner, door)
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_retry_pending is True
+
+        # ── expire cooldown so retry fires on the next step ──────────────────
+        runner.auto_close_retry_time = time.time() - 0.1
+
+        # ── step 1: retry fires, door.close() called, door_move_count = 0.5 ──
+        runner.step()
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+        assert door.get_state() == "closing"
+        count_after_retry = runner.door_move_count
+        assert count_after_retry == pytest.approx(0.5), (
+            f"Expected door_move_count == 0.5 after retry step, got {count_after_retry}"
+        )
+
+        # ── step 2 (BUG WOULD RESET count to 0 here) ─────────────────────────
+        runner.step()
+        count_after_second = runner.door_move_count
+        assert count_after_second == pytest.approx(1.0), (
+            f"door_move_count was reset instead of accumulating: "
+            f"expected 1.0, got {count_after_second}"
+        )
 
     # ── disable auto mid-cycle resets retry state ─────────────────────────────
 
