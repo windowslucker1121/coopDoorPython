@@ -23,6 +23,7 @@ Premature lower-endstop detection (auto-close safety)
  11. Lingering endstop releases before retry — retry succeeds.
  12. Endstop still active at retry time — stuck-state regression.
  13. door_move_count not reset after retry — motor budget accumulates correctly.
+ 14. Auto-mode sunset window does not bypass retry cooldown.
 
 Error state management
  11. ``clear_error_state`` flag clears door error and retry counters.
@@ -592,6 +593,83 @@ class TestPrematureEndstop:
             f"door_move_count was reset instead of accumulating: "
             f"expected 1.0, got {count_after_second}"
         )
+
+    # ── auto-mode sunset window must not override retry cooldown ─────────────
+
+    def test_auto_mode_sunset_window_does_not_bypass_retry_cooldown(self):
+        """Real-world regression from 2026-03-05 log.
+
+        When a premature endstop fires WHILE the auto-mode sunset 1-minute close
+        window is active, the auto-mode block runs every 0.5 s and was writing
+        'desired_door_state = closed' back to global_vars, immediately overriding
+        the 'stopped' state set by premature detection.  On the next iteration
+        d_door_state changed from 'stopped' back to 'closed', door_move_count was
+        reset to 0, and the close was re-issued without waiting for the cooldown.
+
+        Fix: the sunset window write is now guarded with
+        ``not self.auto_close_retry_pending``.
+
+        This test places current_time inside the sunset 1-minute window
+        (sunset was 3 seconds ago) and verifies that:
+        1. After a premature trigger the desired state stays 'stopped'.
+        2. door_move_count does NOT reset to 0 while the cooldown is active.
+        3. The door does NOT start closing again before the retry fires.
+        """
+        _init_gv(
+            auto_mode="True",
+            desired_door_state="closed",
+            reference_door_endstops_ms=REF_MS,
+        )
+        door = DOOR()
+        notifications: list = []
+
+        # Place current_time 3 seconds after sunset → inside the 1-minute window.
+        # sunset_h = -3/3600 means sunset was 3 seconds ago.
+        runner = _make_runner(
+            door,
+            notifications=notifications,
+            sunset_h=-3 / 3600,   # sunset 3 s in the past (inside 1-min window)
+            sunrise_h=12.0,        # sunrise well in the future
+        )
+
+        # Start closing (first_iter fires the boot-time close command)
+        runner.step()
+        assert door.get_state() == "closing"
+
+        # Simulate a premature endstop: only 1 s of travel (ref = 10 s)
+        door.startedMovingTime = time.time() - 1.0
+        _trigger_lower()
+        assert door.get_state() == "closed"
+        _release_lower()
+
+        # This step detects the premature trigger
+        runner.step()
+        assert runner.auto_close_premature_count == 1
+        assert runner.auto_close_retry_pending is True
+        assert global_vars.instance().get_value("desired_door_state") == "stopped"
+
+        # ── Several steps WHILE cooldown is active and sunset window is still on ──
+        # BUG: auto-mode block would write "closed" back, overriding "stopped".
+        for _ in range(4):
+            runner.step()
+            assert global_vars.instance().get_value("desired_door_state") == "stopped", (
+                "Auto-mode sunset window must not override premature-retry cooldown"
+            )
+            assert door.get_state() == "stopped", (
+                f"Door must stay stopped during cooldown, got {door.get_state()}"
+            )
+
+        # door_move_count should still be 0 (door hasn't been commanded to close)
+        assert runner.door_move_count == 0, (
+            f"door_move_count should be 0 while cooldown is active, "
+            f"got {runner.door_move_count}"
+        )
+
+        # ── Cooldown expires → retry must fire and door must start closing ──
+        runner.auto_close_retry_time = time.time() - 0.1
+        runner.step()
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+        assert door.get_state() == "closing"
 
     # ── disable auto mid-cycle resets retry state ─────────────────────────────
 

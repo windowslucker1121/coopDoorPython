@@ -182,7 +182,7 @@ class DoorTaskRunner:
 
                     # If we just booted up, make sure the door is in the
                     # correct position.
-                    if self.first_iter:
+                    if self.first_iter and not self.auto_close_retry_pending:
                         if current_time >= open_time and current_time < close_time:
                             global_vars.instance().set_value("desired_door_state", "open")
                         else:
@@ -193,7 +193,16 @@ class DoorTaskRunner:
                         global_vars.instance().set_value("desired_door_state", "open")
 
                     # If we are in the 1 minute after sunset, command closed.
-                    if current_time >= close_time and current_time <= close_time + time_window:
+                    # Guard: don't override the premature-retry cooldown —
+                    # the retry block will re-issue "closed" once the cooldown
+                    # elapses.  Without this guard the sunset window rewrites
+                    # "closed" every 0.5 s, bypassing the 5-second cooldown and
+                    # resetting door_move_count to 0 on every iteration.
+                    if (
+                        current_time >= close_time
+                        and current_time <= close_time + time_window
+                        and not self.auto_close_retry_pending
+                    ):
                         global_vars.instance().set_value("desired_door_state", "closed")
 
             # Poll endstops every iteration as a reliable safety-net.
@@ -237,10 +246,11 @@ class DoorTaskRunner:
                     self.auto_close_premature_count += 1
                     logger.warning(
                         "Premature lower endstop during auto-close "
-                        "(elapsed=%.2fs, ref=%.2fs, attempt=%d/3)",
+                        "(elapsed=%.2fs, ref=%.2fs, attempt=%d/%d)",
                         elapsed_close_s,
                         ref_close_s,
                         self.auto_close_premature_count,
+                        self.PREMATURE_CLOSE_MAX_RETRIES,
                     )
                     if self.auto_close_premature_count >= self.PREMATURE_CLOSE_MAX_RETRIES:
                         error_msg = (
