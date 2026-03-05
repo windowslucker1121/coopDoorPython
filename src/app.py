@@ -221,8 +221,12 @@ def get_all_data():
         else:
             time_until_close_str = "passed"
 
-    def format_temp(temp, units="F"):
-        return ("%0.1f" % temp) + u'\N{DEGREE SIGN}' + units if temp is not None else ""
+    def format_temp(temp, units="C", convert_from_f=True):
+        if temp is None:
+            return ""
+        if units == "C" and convert_from_f:
+            temp = (temp - 32.0) * (5.0 / 9.0)
+        return ("%0.1f" % temp) + u'\N{DEGREE SIGN}' + units
 
     def format_hum(hum):
         return "%0.1f%%" % hum if hum is not None else ""
@@ -242,9 +246,9 @@ def get_all_data():
       'hum_out': format_hum(hum_out),
       'hum_out_min': format_hum(hum_out_min),
       'hum_out_max': format_hum(hum_out_max),
-      'cpu_temp': format_temp(cpu_temp, units="C"),
-      'cpu_temp_min': format_temp(cpu_temp_min, units="C"),
-      'cpu_temp_max': format_temp(cpu_temp_max, units="C"),
+      'cpu_temp': format_temp(cpu_temp, units="C", convert_from_f=False),
+      'cpu_temp_min': format_temp(cpu_temp_min, units="C", convert_from_f=False),
+      'cpu_temp_max': format_temp(cpu_temp_max, units="C", convert_from_f=False),
       'state': state if state is not None else "",
       'override': state if state is not None and override else "off",
       'uptime': str(get_uptime()),
