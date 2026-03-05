@@ -6,14 +6,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 class DHT22():
-    # Provide data pin and power pin. We power via GPIO so that we can cycle power
-    # between each read of the sensor. This works around the lock ups that frequently
-    # occur with these cheap sensors.
-    def __init__(self, data_pin, power_pin):
-        self.pwr = int(power_pin)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pwr, GPIO.OUT)
-        GPIO.output(self.pwr, GPIO.LOW)
+    # Provide data pin and optional power pin. When a power_pin is supplied the
+    # sensor power is cycled between reads to work around DHT22 lock-up issues.
+    # Pass power_pin=None to skip power cycling (e.g. when the GPIO pin is
+    # used for a different device).
+    def __init__(self, data_pin, power_pin=None):
+        self.pwr = int(power_pin) if power_pin is not None else None
+        if self.pwr is not None:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.pwr, GPIO.OUT)
+            GPIO.output(self.pwr, GPIO.LOW)
         self.dht = adafruit_dht.DHT22(data_pin)
 
     def get_temperature_and_humidity(self):
@@ -21,9 +23,10 @@ class DHT22():
         temp_c = None
         hum = None
 
-        # Turn on power to sensor:
-        GPIO.output(self.pwr, GPIO.HIGH)
-        time.sleep(2.2)
+        if self.pwr is not None:
+            # Turn on power to sensor:
+            GPIO.output(self.pwr, GPIO.HIGH)
+            time.sleep(2.2)
 
         # Try up to 3 times:
         for idx in range(3):
@@ -35,8 +38,9 @@ class DHT22():
                 time.sleep(2.2)
                 continue
 
-        # Turn off power to sensor:
-        GPIO.output(self.pwr, GPIO.LOW)
+        if self.pwr is not None:
+            # Turn off power to sensor:
+            GPIO.output(self.pwr, GPIO.LOW)
 
         if temp_c is not None:
             temp_f = temp_c * (9.0/5.0) + 32.0

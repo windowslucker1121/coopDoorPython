@@ -33,13 +33,16 @@ if os.name != 'nt':
     from gpiozero import CPUTemperature
     import board
     from dht22 import DHT22
+    from dht11 import DHT11
 else:
     logger.warning("Running on Windows, using mock classes.")
     from MockDHT22 import MockDHT22
+    from MockDHT11 import MockDHT11
     from mock_board import MockBoard
     from mock_temperatur import MockCPUTemperature
     CPUTemperature = MockCPUTemperature
     DHT22 = MockDHT22
+    DHT11 = MockDHT11
     board = MockBoard()
 
 
@@ -250,7 +253,7 @@ def get_all_data():
       'reference_door_endstops_ms': str(reference_door_endstops_ms) if reference_door_endstops_ms is not None else "Not set",
       'auto_mode': auto_mode,
       'errorstate' : error_state,
-      'camera_enabled' : str(camera_enabled)
+      'camera_enabled' : str(camera_enabled),
     }
     return data_dict
 
@@ -260,9 +263,9 @@ def get_all_data():
 
 def temperature_task():
     data_pin_out = board.D21
-    data_pin_in = board.D16
+    data_pin_in = board.D26          # DHT11 inside sensor on GPIO 26
     dht_out = DHT22(data_pin_out, power_pin=20)
-    dht_in = DHT22(data_pin_in, power_pin=26)
+    dht_in = DHT11(data_pin_in)
     last_date = None
 
     # Update value in global vars, and also store min and max seen since startup:
@@ -290,7 +293,7 @@ def temperature_task():
 
     while True:
         temp_out, hum_out = dht_out.get_temperature_and_humidity()
-        temp_in, hum_in = dht_in.get_temperature_and_humidity()
+        temp_in, hum_in = dht_in.get_temperature_and_humidity()  # DHT11 inside
 
         #if temp_out is not None and hum_out is not None:
         #    logger.debug("Outside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_out, hum_out))
