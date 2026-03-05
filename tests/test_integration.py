@@ -24,6 +24,7 @@ Premature lower-endstop detection (auto-close safety)
  12. Endstop still active at retry time — stuck-state regression.
  13. door_move_count not reset after retry — motor budget accumulates correctly.
  14. Auto-mode sunset window does not bypass retry cooldown.
+ 15. Close faster than open reference not flagged as premature.
 
 Error state management
  11. ``clear_error_state`` flag clears door error and retry counters.
@@ -106,6 +107,7 @@ def _init_gv(
     auto_mode: str = "False",
     desired_door_state: str = "stopped",
     reference_door_endstops_ms=REF_MS,
+    reference_door_close_ms=None,   # None → mirrors reference_door_endstops_ms
     toggle_reference: bool = False,
     clear_error: bool = False,
     debug_error: bool = False,
@@ -113,11 +115,14 @@ def _init_gv(
     sunset_offset: int = 0,
 ) -> None:
     """Populate global_vars with sensible defaults for a test."""
+    if reference_door_close_ms is None:
+        reference_door_close_ms = reference_door_endstops_ms
     global_vars.instance().set_values(
         {
             "auto_mode": auto_mode,
             "desired_door_state": desired_door_state,
             "reference_door_endstops_ms": reference_door_endstops_ms,
+            "reference_door_close_ms": reference_door_close_ms,
             "toggle_reference_of_endstops": toggle_reference,
             "clear_error_state": clear_error,
             "debug_error": debug_error,
@@ -229,6 +234,12 @@ class TestReferenceSequence:
         assert door.reference_door_endstops_ms > 0
         assert global_vars.instance().get_value("reference_door_endstops_ms") == pytest.approx(
             door.reference_door_endstops_ms
+        )
+        # Close travel time is also stored separately for premature detection
+        assert door.reference_door_close_ms is not None
+        assert door.reference_door_close_ms > 0
+        assert global_vars.instance().get_value("reference_door_close_ms") == pytest.approx(
+            door.reference_door_close_ms
         )
 
         assert door.get_state() == "open"
@@ -452,6 +463,56 @@ class TestPrematureEndstop:
         # No premature action in manual mode
         assert runner.auto_close_premature_count == 0
         assert runner.auto_close_retry_pending is False
+
+    # ── close time < open time must use close-specific reference ─────────────
+
+    def test_close_faster_than_open_reference_not_flagged_premature(self):
+        """Regression: 2026-03-05 log — door closes in ~8 s while open reference
+        is ~17.6 s.  Before the fix the single ``reference_door_endstops_ms``
+        value (open time) was used for premature detection, so 8 s < 80 % * 17.6 s
+        was flagged as premature even though the door genuinely closed.
+
+        Fix: the reference sequence now also records ``reference_door_close_ms``
+        (open→closed travel time) and premature detection uses THAT value.
+
+        Here we set open_ref=10 s, close_ref=5 s.  The door closes in 4 s
+        (80 % of 5 s = 4 s, so 4 s is exactly at the threshold — we use 4.1 s
+        which is > 80 % of 5 s) → should NOT be flagged as premature.
+        """
+        OPEN_REF_MS = 10_000.0   # open travel: 10 s
+        CLOSE_REF_MS = 5_000.0   # close travel:  5 s  (door closes faster, e.g. gravity)
+
+        _init_gv(
+            auto_mode="True",
+            desired_door_state="closed",
+            reference_door_endstops_ms=OPEN_REF_MS,
+            reference_door_close_ms=CLOSE_REF_MS,
+        )
+        door = DOOR()
+        notifications: list = []
+        runner = _make_runner(door, notifications=notifications)
+
+        # Start closing
+        runner.step()
+        assert door.get_state() == "closing"
+
+        # Simulate a close that took 4.1 s — above 80 % of close_ref (5 s → 4 s),
+        # but only 41 % of open_ref (10 s).  With OLD code this would be premature.
+        door.startedMovingTime = time.time() - 4.1
+        _trigger_lower()
+        assert door.get_state() == "closed"
+        _release_lower()
+
+        runner.step()  # timing check
+
+        # Must NOT be flagged as premature
+        assert runner.auto_close_premature_count == 0, (
+            "A close that exceeded 80 % of the close-specific reference time "
+            "must not be counted as premature."
+        )
+        assert runner.auto_close_retry_pending is False
+        assert door.ErrorState() is False
+        assert len(notifications) == 0
 
     # ── lingering endstop (from real-world log 2026-03-03) ───────────────────
 

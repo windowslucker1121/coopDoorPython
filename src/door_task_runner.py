@@ -131,8 +131,12 @@ class DoorTaskRunner:
             global_vars.instance().set_value(
                 "reference_door_endstops_ms", door.reference_door_endstops_ms
             )
+            global_vars.instance().set_value(
+                "reference_door_close_ms", door.reference_door_close_ms
+            )
             logger.info(
-                "Reference Sequence Successfull with total time: %s milliseconds",
+                "Reference Sequence Successfull — close: %.0f ms, open: %.0f ms",
+                door.reference_door_close_ms,
                 door.reference_door_endstops_ms,
             )
             # After a reference sequence the door state is fresh; don't let
@@ -148,11 +152,16 @@ class DoorTaskRunner:
             # Get state and desired state:
             self.door_state = door.get_state()
             self.door_override = door.get_override()
-            d_door_state, auto_mode, reference_door_endstops_ms = (
+            d_door_state, auto_mode, reference_door_endstops_ms, reference_door_close_ms = (
                 global_vars.instance().get_values(
-                    ["desired_door_state", "auto_mode", "reference_door_endstops_ms"]
+                    ["desired_door_state", "auto_mode", "reference_door_endstops_ms",
+                     "reference_door_close_ms"]
                 )
             )
+            # Fall back to open travel time when close time hasn't been measured
+            # yet (e.g. config loaded from an older firmware without close timing).
+            if reference_door_close_ms is None:
+                reference_door_close_ms = reference_door_endstops_ms
 
             auto_mode = auto_mode == "True"
             door.set_auto_mode(auto_mode)
@@ -238,10 +247,10 @@ class DoorTaskRunner:
                 and door_state == "closed"
                 and d_door_state == "closed"
                 and door.startedMovingTime is not None
-                and reference_door_endstops_ms is not None
+                and reference_door_close_ms is not None
             ):
                 elapsed_close_s = time.time() - door.startedMovingTime
-                ref_close_s = reference_door_endstops_ms / 1000.0
+                ref_close_s = reference_door_close_ms / 1000.0
                 if elapsed_close_s < ref_close_s * self.PREMATURE_CLOSE_THRESHOLD:
                     self.auto_close_premature_count += 1
                     logger.warning(
