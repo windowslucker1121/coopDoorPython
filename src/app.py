@@ -720,6 +720,19 @@ def subscribe():
 
     return jsonify({'message': 'Subscription successful!'})
 
+@app.route('/version')
+def get_version():
+    import subprocess
+    try:
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        commit_hash = 'unknown'
+    return jsonify({'version': commit_hash})
+
 @app.route('/update', methods=['POST'])
 def update_app():
     import subprocess
