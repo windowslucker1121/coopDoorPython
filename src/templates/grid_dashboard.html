@@ -114,33 +114,6 @@
             font-weight: 700;
             margin: 52px 0 20px;
             color: var(--text);
-            position: relative;
-            cursor: default;
-            display: inline-block;
-        }
-
-        .page-title::after {
-            content: attr(data-tooltip);
-            position: absolute;
-            top: calc(100% + 6px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--surface);
-            color: var(--text);
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.72rem;
-            font-weight: 400;
-            white-space: nowrap;
-            box-shadow: 0 2px 6px var(--shadow);
-            border: 1px solid var(--border, #ccc);
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s;
-        }
-
-        .page-title:hover::after {
-            opacity: 1;
         }
 
         .page-title-wrapper {
@@ -1500,6 +1473,26 @@
                         <span class="val-max"     id="cpu_temp_max"></span>
                     </div>
                 </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">CPU Load</span>
+                    <span id="cpu_percent" style="font-weight:600;"></span>
+                </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">RAM</span>
+                    <span id="ram_info" style="font-weight:600;"></span>
+                </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">Disk</span>
+                    <span id="disk_info" style="font-weight:600;"></span>
+                </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">Python</span>
+                    <span id="python_version" style="font-weight:600;"></span>
+                </div>
+                <div class="sensor-row">
+                    <span class="sensor-label">Git Commit</span>
+                    <span id="git_commit" style="font-weight:600; font-family: 'Courier New', monospace;"></span>
+                </div>
             </div>
         </div>
 
@@ -1826,6 +1819,10 @@
             document.getElementById('cpu_temp_min').textContent = data.cpu_temp_min;
             document.getElementById('cpu_temp_max').textContent = data.cpu_temp_max;
             document.getElementById('uptime').textContent       = data.uptime;
+            document.getElementById('cpu_percent').textContent  = data.cpu_percent + '%';
+            document.getElementById('ram_info').textContent     = data.ram_used_mb + ' MB / ' + data.ram_total_mb + ' MB (' + data.ram_percent + '%)';
+            document.getElementById('disk_info').textContent    = data.disk_used_gb + ' GB / ' + data.disk_total_gb + ' GB (' + data.disk_percent + '%)';
+            document.getElementById('python_version').textContent = data.python_version;
             document.getElementById('sunrise').textContent      = data.sunrise;
             document.getElementById('sunset').textContent       = data.sunset;
             document.getElementById('tu_open').textContent      = data.tu_open;
@@ -2108,8 +2105,8 @@
             fetch('/version')
                 .then(r => r.json())
                 .then(data => {
-                    const title = document.getElementById('pageTitle');
-                    if (title) title.dataset.tooltip = 'commit: ' + data.version;
+                    const el = document.getElementById('git_commit');
+                    if (el) el.textContent = data.version;
                 })
                 .catch(() => {});
         });

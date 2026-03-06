@@ -260,6 +260,15 @@ def get_all_data():
       'auto_mode': auto_mode,
       'errorstate' : error_state,
       'camera_enabled' : str(camera_enabled),
+      # System metrics
+      'cpu_percent': str(round(psutil.cpu_percent(interval=0), 1)),
+      'ram_used_mb': str(round(psutil.virtual_memory().used / (1024 * 1024), 0)),
+      'ram_total_mb': str(round(psutil.virtual_memory().total / (1024 * 1024), 0)),
+      'ram_percent': str(round(psutil.virtual_memory().percent, 1)),
+      'disk_used_gb': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').used / (1024 ** 3), 1)),
+      'disk_total_gb': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').total / (1024 ** 3), 1)),
+      'disk_percent': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').percent, 1)),
+      'python_version': sys.version.split()[0],
     }
     return data_dict
 
