@@ -94,8 +94,7 @@
             /* 2 boxes width */
             #error_section,
             #card-door,
-            #card-temperature,
-            #card-logs {
+            #card-temperature {
                 grid-column: span 2;
             }
 
@@ -323,18 +322,7 @@
             border-radius: var(--radius-sm);
         }
 
-        /* ── Logs ───────────────────────────────────────────── */
-        #logs {
-            height: 260px;
-            overflow-y: auto;
-            background: var(--surface-alt);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            padding: 10px 12px;
-            font-size: 0.82rem;
-            font-family: 'Courier New', monospace;
-            color: var(--text);
-        }
+
 
         /* ── Modal ──────────────────────────────────────────── */
         .modal {
@@ -1681,6 +1669,55 @@
             </div>
         </div>
 
+        <!-- ── Data Visualization ── -->
+        <div id="data_visualization_section" class="card">
+            <div class="collapsible-header" onclick="toggleSection('dataVisualizationSection', this)">
+                <h3>&#x1F4CA; Data Visualization</h3>
+                <span class="chevron">&#x25BC;</span>
+            </div>
+            <div id="dataVisualizationSection" class="content-section">
+
+                <!-- Toolbar: file selector + refresh + stats -->
+                <div class="dv-toolbar">
+                    <div class="dv-toolbar-left">
+                        <select id="dv-file-select" class="select-full" onchange="dvLoadFile()" style="width:auto;min-width:170px;"
+                                title="Select a date to view">
+                            <option value="">&#x2014; loading&#x2026; &#x2014;</option>
+                        </select>
+                        <button class="dv-icon-btn" onclick="dvLoadFile()" title="Refresh chart">&#x21BB; Refresh</button>
+                    </div>
+                    <span class="dv-stat" id="dv-stat"></span>
+                </div>
+
+                <!-- Series toggle chips -->
+                <div class="dv-series-bar" id="dv-series-bar">
+                    <button class="dv-series-btn active" data-series="temp_in"  style="--sc:#e74c3c" onclick="dvToggleSeries(this)">Temp In &deg;F</button>
+                    <button class="dv-series-btn active" data-series="temp_out" style="--sc:#3498db" onclick="dvToggleSeries(this)">Temp Out &deg;F</button>
+                    <button class="dv-series-btn active" data-series="hum_in"   style="--sc:#9b59b6" onclick="dvToggleSeries(this)">Hum In %</button>
+                    <button class="dv-series-btn active" data-series="hum_out"  style="--sc:#2ecc71" onclick="dvToggleSeries(this)">Hum Out %</button>
+                    <button class="dv-series-btn active" data-series="cpu_temp" style="--sc:#f39c12" onclick="dvToggleSeries(this)">CPU &deg;C</button>
+                </div>
+
+                <!-- Chart canvas + overlay messages -->
+                <div class="dv-chart-wrap">
+                    <div class="dv-message" id="dv-loading" style="display:flex;">&#x23F3; Loading data&#x2026;</div>
+                    <div class="dv-message" id="dv-empty"  style="display:none;">Select a date above to load chart data.</div>
+                    <canvas id="dv-canvas" style="display:none;"></canvas>
+                </div>
+
+                <!-- Door-state colour legend (shown only when data has state info) -->
+                <div class="dv-door-legend" id="dv-door-legend">
+                    <span class="section-subtitle" style="margin:0;line-height:1.6;">Door State:</span>
+                    <span class="dv-door-chip dv-door-open">&#9632; Open</span>
+                    <span class="dv-door-chip dv-door-opening">&#9632; Opening</span>
+                    <span class="dv-door-chip dv-door-closed">&#9632; Closed</span>
+                    <span class="dv-door-chip dv-door-closing">&#9632; Closing</span>
+                    <span class="dv-door-chip dv-door-stopped">&#9632; Stopped</span>
+                </div>
+
+            </div>
+        </div>
+
         <!-- ── Location ── -->
         <div id="card-location" class="card">
             <div class="collapsible-header" onclick="toggleSection('location', this)">
@@ -1799,66 +1836,6 @@
                     </button>
                 </form>
 
-            </div>
-        </div>
-
-        <!-- ── Data Visualization ── -->
-        <div id="data_visualization_section" class="card">
-            <div class="collapsible-header" onclick="toggleSection('dataVisualizationSection', this)">
-                <h3>📊 Data Visualization</h3>
-                <span class="chevron">▼</span>
-            </div>
-            <div id="dataVisualizationSection" class="content-section">
-
-                <!-- Toolbar: file selector + refresh + stats -->
-                <div class="dv-toolbar">
-                    <div class="dv-toolbar-left">
-                        <select id="dv-file-select" class="select-full" onchange="dvLoadFile()" style="width:auto;min-width:170px;"
-                                title="Select a date to view">
-                            <option value="">&#x2014; loading&#x2026; &#x2014;</option>
-                        </select>
-                        <button class="dv-icon-btn" onclick="dvLoadFile()" title="Refresh chart">&#x21BB; Refresh</button>
-                    </div>
-                    <span class="dv-stat" id="dv-stat"></span>
-                </div>
-
-                <!-- Series toggle chips -->
-                <div class="dv-series-bar" id="dv-series-bar">
-                    <button class="dv-series-btn active" data-series="temp_in"  style="--sc:#e74c3c" onclick="dvToggleSeries(this)">Temp In &deg;F</button>
-                    <button class="dv-series-btn active" data-series="temp_out" style="--sc:#3498db" onclick="dvToggleSeries(this)">Temp Out &deg;F</button>
-                    <button class="dv-series-btn active" data-series="hum_in"   style="--sc:#9b59b6" onclick="dvToggleSeries(this)">Hum In %</button>
-                    <button class="dv-series-btn active" data-series="hum_out"  style="--sc:#2ecc71" onclick="dvToggleSeries(this)">Hum Out %</button>
-                    <button class="dv-series-btn active" data-series="cpu_temp" style="--sc:#f39c12" onclick="dvToggleSeries(this)">CPU &deg;C</button>
-                </div>
-
-                <!-- Chart canvas + overlay messages -->
-                <div class="dv-chart-wrap">
-                    <div class="dv-message" id="dv-loading" style="display:flex;">&#x23F3; Loading data&#x2026;</div>
-                    <div class="dv-message" id="dv-empty"  style="display:none;">Select a date above to load chart data.</div>
-                    <canvas id="dv-canvas" style="display:none;"></canvas>
-                </div>
-
-                <!-- Door-state colour legend (shown only when data has state info) -->
-                <div class="dv-door-legend" id="dv-door-legend">
-                    <span class="section-subtitle" style="margin:0;line-height:1.6;">Door State:</span>
-                    <span class="dv-door-chip dv-door-open">&#9632; Open</span>
-                    <span class="dv-door-chip dv-door-opening">&#9632; Opening</span>
-                    <span class="dv-door-chip dv-door-closed">&#9632; Closed</span>
-                    <span class="dv-door-chip dv-door-closing">&#9632; Closing</span>
-                    <span class="dv-door-chip dv-door-stopped">&#9632; Stopped</span>
-                </div>
-
-            </div>
-        </div>
-
-        <!-- ── Server Logs ── -->
-        <div id="card-logs" class="card">
-            <div class="collapsible-header" onclick="toggleSection('logSection', this)">
-                <h3>📋 Server Logs</h3>
-                <span class="chevron">▼</span>
-            </div>
-            <div id="logSection" class="content-section" style="padding: 12px;">
-                <div id="logs"></div>
             </div>
         </div>
 
@@ -2012,6 +1989,7 @@
 
         socket.on('log', function(data) {
             const logsDiv = document.getElementById('logs');
+            if (!logsDiv) return;
             const newLog  = document.createElement('div');
             newLog.textContent = data.message;
             logsDiv.appendChild(newLog);
@@ -2290,8 +2268,8 @@
         /* ── Collapsibles ──────────────────────────── */
         const COLLAPSIBLE_IDS = [
             'errorSection', 'webcam_section', 'door_control',
-            'system', 'temperature', 'location', 'manual_location_inputs',
-            'dataVisualizationSection', 'logSection'
+            'system', 'temperature', 'dataVisualizationSection',
+            'location', 'manual_location_inputs'
         ];
 
         function toggleSection(id, headerEl) {
