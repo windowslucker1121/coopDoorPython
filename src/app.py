@@ -386,21 +386,17 @@ def data_log_task():
     log_dir = os.path.dirname(get_log_file_name())
     os.makedirs(log_dir, exist_ok=True)
 
-    #check if the todaysLogFile is there already and if so remove it
-    todaysLog = get_log_file_name()
-    if os.path.exists(todaysLog):
-        os.remove(todaysLog)
-
     last_log_file_name = ""
     while True:
         data = get_all_data()
 
-        # Open new log file and write CSV header if it is a new day
+        # Open new log file and write CSV header only if the file doesn't exist yet (new day or first run)
         log_file_name = get_log_file_name()
         if log_file_name != last_log_file_name:
-            with open(log_file_name, 'a') as file:
-                header = "# " + ", ".join(data.keys()) + "\n"
-                file.write(header)
+            if not os.path.exists(log_file_name):
+                with open(log_file_name, 'a') as file:
+                    header = "# " + ", ".join(data.keys()) + "\n"
+                    file.write(header)
 
         # Append data to file:
         with open(log_file_name, 'a') as file:
