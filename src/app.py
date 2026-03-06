@@ -815,6 +815,96 @@ def api_log_content(filename):
 
     return jsonify(lines)
 
+# ── CSV Data Viewer API ───────────────────────────────────────────────────────
+
+@app.route('/api/csv')
+def api_csv_files():
+    """Return list of available CSV log files, newest first."""
+    log_dir = os.path.join(root_path, "log")
+    files = []
+    if os.path.isdir(log_dir):
+        for f in sorted(os.listdir(log_dir), reverse=True):
+            if f.endswith('.csv'):
+                full_path = os.path.join(log_dir, f)
+                try:
+                    stat = os.stat(full_path)
+                    files.append({
+                        'name': f,
+                        'size': stat.st_size,
+                        'modified': stat.st_mtime
+                    })
+                except OSError:
+                    pass
+    return jsonify(files)
+
+
+@app.route('/api/csv/<path:filename>')
+def api_csv_content(filename):
+    """Return parsed, downsampled rows from a CSV log file as JSON."""
+    import re as _re
+    filename = os.path.basename(filename)
+    if not filename.endswith('.csv'):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    log_dir = os.path.join(root_path, "log")
+    csv_path = os.path.join(log_dir, filename)
+    if not os.path.isfile(csv_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    NUMERIC_FIELDS = {
+        'temp_in', 'temp_in_min', 'temp_in_max',
+        'temp_out', 'temp_out_min', 'temp_out_max',
+        'hum_in', 'hum_in_min', 'hum_in_max',
+        'hum_out', 'hum_out_min', 'hum_out_max',
+        'cpu_temp', 'cpu_temp_min', 'cpu_temp_max',
+    }
+    STRING_FIELDS = {'state', 'override', 'auto_mode', 'errorstate'}
+    INCLUDE_FIELDS = NUMERIC_FIELDS | STRING_FIELDS | {'time'}
+
+    try:
+        rows = []
+        headers = None
+        with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if headers is None:
+                    headers = [h.strip().lstrip('#').strip() for h in line.split(',')]
+                    continue
+                values = [v.strip() for v in line.split(',')]
+                if len(values) < len(headers):
+                    continue
+                row = {}
+                for h, v in zip(headers, values):
+                    if h not in INCLUDE_FIELDS:
+                        continue
+                    if h == 'time':
+                        row['time'] = v.split('.')[0].strip()
+                    elif h in NUMERIC_FIELDS:
+                        numeric = _re.sub(r'[^\d.\-]', '', v)
+                        try:
+                            row[h] = round(float(numeric), 2)
+                        except ValueError:
+                            row[h] = None
+                    else:
+                        row[h] = v
+                if 'time' in row:
+                    rows.append(row)
+
+        # Downsample to at most 600 points (keeps rendering fast)
+        MAX_ROWS = 600
+        total = len(rows)
+        if total > MAX_ROWS:
+            step = total / MAX_ROWS
+            rows = [rows[int(i * step)] for i in range(MAX_ROWS)]
+
+        return jsonify({'count': len(rows), 'total': total, 'rows': rows})
+    except Exception as e:
+        logger.error(f"Error reading CSV file {filename}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/update', methods=['POST'])
 def update_app():
     import subprocess

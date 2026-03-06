@@ -102,9 +102,13 @@
             /* 1 box width */
             #card-webcam,
             #card-system,
-            #card-location,
-            #data_visualization_section {
+            #card-location {
                 grid-column: span 1;
+            }
+
+            /* full width — chart needs room */
+            #data_visualization_section {
+                grid-column: span 2;
             }
         }
 
@@ -1210,6 +1214,108 @@
             #logViewerModal { padding: 8px; }
         }
 
+        /* ── Data Visualization ─────────────────────────────── */
+        .dv-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+
+        .dv-toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .dv-stat {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .dv-icon-btn {
+            padding: 7px 11px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--surface-alt);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 600;
+            transition: background 0.18s;
+            white-space: nowrap;
+        }
+
+        .dv-icon-btn:hover { background: var(--surface-hover); }
+
+        .dv-series-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+
+        .dv-series-btn {
+            padding: 5px 12px;
+            border: 2px solid var(--sc, var(--border));
+            border-radius: 20px;
+            background: transparent;
+            color: var(--sc, var(--text));
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.18s, color 0.18s, opacity 0.18s;
+            opacity: 0.45;
+            letter-spacing: 0.02em;
+        }
+
+        .dv-series-btn.active {
+            background: var(--sc, var(--border));
+            color: #fff;
+            opacity: 1;
+        }
+
+        .dv-chart-wrap { position: relative; }
+
+        .dv-message {
+            display: none;
+            min-height: 200px;
+            align-items: center;
+            justify-content: center;
+            background: var(--surface-alt);
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            border: 1px solid var(--border);
+        }
+
+        .dv-door-legend {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .dv-door-chip {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 10px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+        }
+
+        .dv-door-open    { color: var(--btn-open);      }
+        .dv-door-closed  { color: var(--btn-close);     }
+        .dv-door-opening { color: var(--accent);        }
+        .dv-door-closing { color: var(--btn-reference); }
+        .dv-door-stopped { color: var(--btn-stop);      }
+
     </style>
 </head>
 <body>
@@ -1703,10 +1809,45 @@
                 <span class="chevron">▼</span>
             </div>
             <div id="dataVisualizationSection" class="content-section">
-                <div style="margin-bottom: 12px;">
-                    <button class="btn btn-reference" onclick="socket.emit('get_csv_data')">Load Today's CSV Data</button>
+
+                <!-- Toolbar: file selector + refresh + stats -->
+                <div class="dv-toolbar">
+                    <div class="dv-toolbar-left">
+                        <select id="dv-file-select" class="select-full" onchange="dvLoadFile()" style="width:auto;min-width:170px;"
+                                title="Select a date to view">
+                            <option value="">&#x2014; loading&#x2026; &#x2014;</option>
+                        </select>
+                        <button class="dv-icon-btn" onclick="dvLoadFile()" title="Refresh chart">&#x21BB; Refresh</button>
+                    </div>
+                    <span class="dv-stat" id="dv-stat"></span>
                 </div>
-                <canvas id="dataChart" style="display: none;"></canvas>
+
+                <!-- Series toggle chips -->
+                <div class="dv-series-bar" id="dv-series-bar">
+                    <button class="dv-series-btn active" data-series="temp_in"  style="--sc:#e74c3c" onclick="dvToggleSeries(this)">Temp In &deg;F</button>
+                    <button class="dv-series-btn active" data-series="temp_out" style="--sc:#3498db" onclick="dvToggleSeries(this)">Temp Out &deg;F</button>
+                    <button class="dv-series-btn active" data-series="hum_in"   style="--sc:#9b59b6" onclick="dvToggleSeries(this)">Hum In %</button>
+                    <button class="dv-series-btn active" data-series="hum_out"  style="--sc:#2ecc71" onclick="dvToggleSeries(this)">Hum Out %</button>
+                    <button class="dv-series-btn active" data-series="cpu_temp" style="--sc:#f39c12" onclick="dvToggleSeries(this)">CPU &deg;C</button>
+                </div>
+
+                <!-- Chart canvas + overlay messages -->
+                <div class="dv-chart-wrap">
+                    <div class="dv-message" id="dv-loading" style="display:flex;">&#x23F3; Loading data&#x2026;</div>
+                    <div class="dv-message" id="dv-empty"  style="display:none;">Select a date above to load chart data.</div>
+                    <canvas id="dv-canvas" style="display:none;"></canvas>
+                </div>
+
+                <!-- Door-state colour legend (shown only when data has state info) -->
+                <div class="dv-door-legend" id="dv-door-legend">
+                    <span class="section-subtitle" style="margin:0;line-height:1.6;">Door State:</span>
+                    <span class="dv-door-chip dv-door-open">&#9632; Open</span>
+                    <span class="dv-door-chip dv-door-opening">&#9632; Opening</span>
+                    <span class="dv-door-chip dv-door-closed">&#9632; Closed</span>
+                    <span class="dv-door-chip dv-door-closing">&#9632; Closing</span>
+                    <span class="dv-door-chip dv-door-stopped">&#9632; Stopped</span>
+                </div>
+
             </div>
         </div>
 
@@ -1915,57 +2056,213 @@
             localStorage.setItem('sunset_offset',  sunset_offset);
         }
 
-        /* ── CSV Chart ─────────────────────────────── */
-        socket.on('csv_data', function(data) {
-            console.log('Received CSV data:', data);
-            const dataChartItem = document.getElementById('dataChart');
-            dataChartItem.style.display = 'block';
-            const ctx = dataChartItem.getContext('2d');
+        /* ── Data Visualization (REST-based, replaces old socket csv_data) ── */
+        // Legacy socket handler — no-op, kept for protocol completeness
+        socket.on('csv_data', function() {});
 
-            function parseCSV(csvArray) {
-                const rows = csvArray.map(row => row.trim());
-                const headers = rows.shift().split(", ").map(h => h.trim().replace(/^#\s*/, ''));
-                const data = rows.map(row => {
-                    const values = row.split(", ").map(v => v.trim());
-                    return headers.reduce((obj, header, index) => {
-                        const numericValue = values[index].replace(/[^\d.-]/g, '');
-                        obj[header] = isNaN(numericValue) ? values[index] : parseFloat(numericValue);
-                        return obj;
-                    }, {});
+        /* Series metadata: key, label, axis, color, unit */
+        const DV_SERIES = [
+            { key: 'temp_in',   label: 'Temp In',   color: '#e74c3c', axis: 'yTemp', unit: '\u00b0F' },
+            { key: 'temp_out',  label: 'Temp Out',  color: '#3498db', axis: 'yTemp', unit: '\u00b0F' },
+            { key: 'hum_in',    label: 'Hum In',    color: '#9b59b6', axis: 'yHum',  unit: '%'       },
+            { key: 'hum_out',   label: 'Hum Out',   color: '#2ecc71', axis: 'yHum',  unit: '%'       },
+            { key: 'cpu_temp',  label: 'CPU Temp',  color: '#f39c12', axis: 'yTemp', unit: '\u00b0C' },
+        ];
+
+        const DV_DOOR_COLORS = {
+            open:    'rgba(60,179,113,0.13)',
+            opening: 'rgba(49,126,251,0.13)',
+            closed:  'rgba(136,136,136,0.10)',
+            closing: 'rgba(255,140,0,0.13)',
+            stopped: 'rgba(224,85,85,0.13)',
+        };
+
+        let _dv_chart   = null;
+        let _dv_rows    = [];
+        let _dv_inited  = false;
+
+        async function dvInit() {
+            if (_dv_inited) return;
+            _dv_inited = true;
+            dvShowLoading();
+            try {
+                const res   = await fetch('/api/csv');
+                const files = await res.json();
+                const sel   = document.getElementById('dv-file-select');
+                sel.innerHTML = '<option value="">\u2014 select a date \u2014</option>';
+                files.forEach(f => {
+                    const opt   = document.createElement('option');
+                    opt.value   = f.name;
+                    opt.textContent = f.name.replace('.csv','').replace(/_/g,'-');
+                    sel.appendChild(opt);
                 });
-                return { headers, data };
+                if (files.length > 0) {
+                    sel.value = files[0].name;
+                    await dvLoadFile();
+                } else {
+                    dvShowEmpty('No CSV data files found.');
+                }
+            } catch(e) {
+                dvShowEmpty('Could not load file list: ' + e.message);
             }
+        }
 
-            const parsedData = parseCSV(data);
-            const labels = parsedData.data.map(row => row.time);
-            const datasets = parsedData.headers
-                .filter(h => h !== 'time' && parsedData.data.some(row => !isNaN(row[h])))
-                .map(h => ({
-                    label: h.replace(/_/g, ' '),
-                    data: parsedData.data.map(row => row[h]),
-                    borderColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
-                    fill: false
+        async function dvLoadFile() {
+            const filename = document.getElementById('dv-file-select').value;
+            if (!filename) { dvShowEmpty('Select a date to load data.'); return; }
+            dvShowLoading();
+            try {
+                const res  = await fetch('/api/csv/' + encodeURIComponent(filename));
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                _dv_rows = data.rows;
+                const statEl = document.getElementById('dv-stat');
+                const sampled = data.count !== data.total
+                    ? data.count + ' pts (downsampled from ' + data.total + ')'
+                    : data.count + ' data points';
+                statEl.textContent = sampled;
+                dvRender();
+            } catch(e) {
+                dvShowEmpty('Error loading data: ' + e.message);
+            }
+        }
+
+        function dvToggleSeries(btn) {
+            btn.classList.toggle('active');
+            if (_dv_rows.length > 0) dvRender();
+        }
+
+        function dvShowLoading() {
+            document.getElementById('dv-loading').style.display = 'flex';
+            document.getElementById('dv-empty').style.display   = 'none';
+            document.getElementById('dv-canvas').style.display  = 'none';
+        }
+
+        function dvShowEmpty(msg) {
+            const el = document.getElementById('dv-empty');
+            el.textContent = msg || 'No data.';
+            el.style.display = 'flex';
+            document.getElementById('dv-loading').style.display = 'none';
+            document.getElementById('dv-canvas').style.display  = 'none';
+        }
+
+        function dvRender() {
+            if (!_dv_rows.length) { dvShowEmpty('No data points in this file.'); return; }
+
+            document.getElementById('dv-loading').style.display = 'none';
+            document.getElementById('dv-empty').style.display   = 'none';
+            const canvas = document.getElementById('dv-canvas');
+            canvas.style.display = 'block';
+
+            const activeKeys = [...document.querySelectorAll('.dv-series-btn.active')]
+                .map(b => b.dataset.series);
+
+            const labels   = _dv_rows.map(r => r.time);
+            const doorStates = _dv_rows.map(r => r.state || '');
+
+            const datasets = DV_SERIES
+                .filter(s => activeKeys.includes(s.key))
+                .map(s => ({
+                    label:           s.label + ' (' + s.unit + ')',
+                    data:            _dv_rows.map(r => r[s.key] != null ? r[s.key] : null),
+                    borderColor:     s.color,
+                    backgroundColor: s.color + '22',
+                    borderWidth:     1.8,
+                    pointRadius:     0,
+                    pointHoverRadius: 5,
+                    tension:         0.25,
+                    yAxisID:         s.axis,
+                    spanGaps:        true,
                 }));
 
-            if (window.myChart) window.myChart.destroy();
+            /* Inline plugin: coloured door-state background bands */
+            const doorBgPlugin = {
+                id: 'dvDoorBg',
+                beforeDraw(chart) {
+                    const { ctx, chartArea, scales } = chart;
+                    if (!chartArea || !scales.x) return;
+                    const xScale = scales.x;
+                    ctx.save();
+                    for (let i = 0; i < doorStates.length; i++) {
+                        const col = DV_DOOR_COLORS[doorStates[i]];
+                        if (!col) continue;
+                        const x0 = xScale.getPixelForValue(i);
+                        const x1 = xScale.getPixelForValue(i + 1);
+                        ctx.fillStyle = col;
+                        ctx.fillRect(x0, chartArea.top, Math.max(x1 - x0, 1), chartArea.height);
+                    }
+                    ctx.restore();
+                }
+            };
 
-            window.myChart = new Chart(ctx, {
+            const hasTempAxis = activeKeys.some(k => ['temp_in','temp_out','cpu_temp'].includes(k));
+            const hasHumAxis  = activeKeys.some(k => ['hum_in','hum_out'].includes(k));
+
+            if (_dv_chart) _dv_chart.destroy();
+
+            _dv_chart = new Chart(canvas.getContext('2d'), {
                 type: 'line',
                 data: { labels, datasets },
                 options: {
-                    responsive: true,
+                    responsive:         true,
+                    maintainAspectRatio: true,
+                    animation:          false,
                     plugins: {
-                        legend: { position: 'bottom' },
-                        tooltip: { mode: 'index', intersect: false }
+                        legend: {
+                            position: 'bottom',
+                            labels: { usePointStyle: true, pointStyleWidth: 10, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            mode:       'index',
+                            intersect:  false,
+                            callbacks: {
+                                afterBody(items) {
+                                    if (!items.length) return [];
+                                    const idx = items[0].dataIndex;
+                                    const r   = _dv_rows[idx];
+                                    return r ? ['Door: ' + (r.state || '\u2014')] : [];
+                                }
+                            }
+                        }
                     },
                     interaction: { mode: 'nearest', axis: 'x', intersect: false },
                     scales: {
-                        x: { display: true, title: { display: true, text: 'Time' } },
-                        y: { display: true, title: { display: true, text: 'Values' } }
+                        x: {
+                            display: true,
+                            ticks: {
+                                maxTicksLimit: 10,
+                                maxRotation:   0,
+                                color:         'var(--text-muted)',
+                                font:          { size: 10 },
+                                autoSkip:      true,
+                            },
+                            grid: { color: 'var(--border)' }
+                        },
+                        yTemp: {
+                            type:     'linear',
+                            position: 'left',
+                            display:  hasTempAxis,
+                            title:    { display: true, text: 'Temperature', color: 'var(--text-muted)', font: { size: 10 } },
+                            ticks:    { color: 'var(--text-muted)', font: { size: 10 } },
+                            grid:     { color: 'var(--border)' }
+                        },
+                        yHum: {
+                            type:     'linear',
+                            position: 'right',
+                            display:  hasHumAxis,
+                            title:    { display: true, text: 'Humidity (%)', color: 'var(--text-muted)', font: { size: 10 } },
+                            ticks:    { color: 'var(--text-muted)', font: { size: 10 } },
+                            grid:     { drawOnChartArea: false }
+                        }
                     }
-                }
+                },
+                plugins: [doorBgPlugin]
             });
-        });
+
+            /* Show/hide door legend */
+            const dvLegend = document.getElementById('dv-door-legend');
+            dvLegend.style.display = doorStates.some(s => s) ? 'flex' : 'none';
+        }
 
         /* ── Location ──────────────────────────────── */
         function populateLocationFields() {
@@ -2078,6 +2375,18 @@
 
         /* ── Init ──────────────────────────────────── */
         document.addEventListener('DOMContentLoaded', function() {
+            /* Lazy-init data viz when section is first opened */
+            const _dvSection = document.getElementById('dataVisualizationSection');
+            const _dvObserver = new MutationObserver(() => {
+                if (_dvSection.style.display !== 'none') {
+                    dvInit();
+                    _dvObserver.disconnect();
+                }
+            });
+            _dvObserver.observe(_dvSection, { attributes: true, attributeFilter: ['style'] });
+            /* Also init immediately if section is already open */
+            if (_dvSection && _dvSection.style.display !== 'none') dvInit();
+
             socket.on('connect_error', function(error) {
                 console.error('Failed to connect to server:', error);
                 openModal("Socket IO Connect error: " + (error.message || 'Unknown error'));
