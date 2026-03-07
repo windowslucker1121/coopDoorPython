@@ -47,6 +47,8 @@ else:
     DHT11 = MockDHT11
     board = MockBoard()
 
+from location_temperature_sensor import LocationAPITemperatureSensor
+
 
 ##################################
 # Flask configuration:
@@ -131,8 +133,9 @@ def load_config():
             #will be used for currently not implemented stopping/starting of the logging thread
             "csvLog": True,
             "enable_camera" : False,
-            "camera_index" : 0
-            
+            "camera_index" : 0,
+            # Outdoor sensor backend: "dht22" (physical sensor) or "api" (Open-Meteo)
+            "outdoor_sensor_type": "dht22",
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
@@ -277,10 +280,19 @@ def get_all_data():
 ##################################
 
 def temperature_task():
-    data_pin_out = board.D21
     data_pin_in = board.D26          # DHT11 inside sensor on GPIO 26
-    dht_out = DHT22(data_pin_out, power_pin=20)
     dht_in = DHT11(data_pin_in)
+
+    outdoor_sensor_type = global_vars.instance().get_value("outdoor_sensor_type") or "dht22"
+    if outdoor_sensor_type == "api":
+        logger.info("temperature_task: using LocationAPITemperatureSensor for outdoor readings")
+        dht_out = LocationAPITemperatureSensor(
+            get_location=lambda: global_vars.instance().get_value("location")
+        )
+    else:
+        logger.info("temperature_task: using DHT22 hardware sensor for outdoor readings")
+        data_pin_out = board.D21
+        dht_out = DHT22(data_pin_out, power_pin=20)
     last_date = None
 
     # Update value in global vars, and also store min and max seen since startup:

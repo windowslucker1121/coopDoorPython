@@ -1,10 +1,11 @@
 import adafruit_dht
 import time
 import logging
+from temperature_sensor import TemperatureSensor
 
 logger = logging.getLogger(__name__)
 
-class DHT11():
+class DHT11(TemperatureSensor):
     """Wrapper around adafruit_dht.DHT11.
 
     Unlike DHT22 this sensor does not require GPIO power-cycling, so no

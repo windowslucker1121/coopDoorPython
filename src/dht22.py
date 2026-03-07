@@ -3,9 +3,10 @@ import RPi.GPIO as GPIO
 import board
 import time
 import logging
+from temperature_sensor import TemperatureSensor
 
 logger = logging.getLogger(__name__)
-class DHT22():
+class DHT22(TemperatureSensor):
     # Provide data pin and optional power pin. When a power_pin is supplied the
     # sensor power is cycled between reads to work around DHT22 lock-up issues.
     # Pass power_pin=None to skip power cycling (e.g. when the GPIO pin is

@@ -1,6 +1,7 @@
 import random
+from temperature_sensor import TemperatureSensor
 
-class MockDHT11:
+class MockDHT11(TemperatureSensor):
     def __init__(self, data_pin=None):
         pass
 
