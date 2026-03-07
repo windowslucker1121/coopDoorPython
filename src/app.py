@@ -111,7 +111,8 @@ def save_config():
                 "consoleLogToFile": global_vars.instance().get_value("consoleLogToFile"),
                 "csvLog": global_vars.instance().get_value("csvLog"),
                 "enable_camera" : global_vars.instance().get_value("enable_camera"),
-                "camera_index" : global_vars.instance().get_value("camera_index")
+                "camera_index" : global_vars.instance().get_value("camera_index"),
+                "outdoor_sensor_type": global_vars.instance().get_value("outdoor_sensor_type")
             }
             yaml.dump(to_dump, file)
 
