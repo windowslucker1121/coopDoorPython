@@ -679,14 +679,41 @@
         }
 
         /* ── Sky backdrop (fills .state-display behind the door SVG) ── */
-        .sky-bg-svg {
+        .sky-panel {
             position: absolute;
             inset: 0;
-            width: 100%;
-            height: 100%;
             z-index: 0;
-            display: block;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            background: linear-gradient(to bottom, #2980B9, #87CEEB);
+            pointer-events: none;
         }
+
+        .sky-orb {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            transform: translate(-50%, 50%);
+            pointer-events: none;
+            background: #FFF176;
+            box-shadow: 0 0 16px 6px rgba(255,240,80,0.45);
+            transition: background-color 10s ease, box-shadow 10s ease,
+                        width 6s ease, height 6s ease;
+        }
+
+        .sky-star {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            border-radius: 50%;
+            background: #fff;
+            opacity: 0;
+            transition: opacity 6s ease;
+            pointer-events: none;
+        }
+
+        .sky-panel.is-night .sky-star { opacity: 0.8; }
 
         /* ── Door SVG Animation ──────────────────────────────── */
         .door-svg {
@@ -1464,68 +1491,15 @@
                     <div class="door-panel">
                         <!-- State Display -->
                         <div class="state-display" id="state">
-                            <!-- Sky backdrop: day/night cycle always visible behind the door -->
-                            <svg class="sky-bg-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice"
-                                 xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <defs>
-                                    <filter id="sky-glow" x="-80%" y="-80%" width="260%" height="260%">
-                                        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
-                                        <feMerge>
-                                            <feMergeNode in="blur"/>
-                                            <feMergeNode in="SourceGraphic"/>
-                                        </feMerge>
-                                    </filter>
-                                </defs>
-                                <!-- Sky base color: dawn → day → sunset → night → dawn -->
-                                <rect width="100" height="100">
-                                    <animate attributeName="fill"
-                                        values="#FF9E6D;#87CEEB;#87CEEB;#FF7040;#07101e;#07101e;#FF9E6D"
-                                        keyTimes="0;0.10;0.42;0.52;0.60;0.90;1"
-                                        dur="120s" repeatCount="indefinite"/>
-                                </rect>
-                                <!-- Stars: fade in during night, out at dawn -->
-                                <circle cx="15" cy="12" r="1.2" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.9;0.9;0" keyTimes="0;0.55;0.65;0.90;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="35" cy="8" r="1.0" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.7;0.7;0" keyTimes="0;0.57;0.67;0.89;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="58" cy="15" r="1.2" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.85;0.85;0" keyTimes="0;0.56;0.66;0.91;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="75" cy="10" r="0.9" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.7;0.7;0" keyTimes="0;0.58;0.68;0.88;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="88" cy="28" r="1.1" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.8;0.8;0" keyTimes="0;0.55;0.66;0.90;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="22" cy="32" r="1.0" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.75;0.75;0" keyTimes="0;0.57;0.67;0.89;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="50" cy="22" r="0.9" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.65;0.65;0" keyTimes="0;0.59;0.69;0.88;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <circle cx="67" cy="38" r="1.1" fill="#fff">
-                                    <animate attributeName="opacity" values="0;0;0.8;0.8;0" keyTimes="0;0.56;0.67;0.90;1" dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                                <!-- Sun/Moon: rises left → peaks at top → sets right, returns below (night) -->
-                                <circle cx="0" cy="0" r="7" filter="url(#sky-glow)">
-                                    <!-- golden sun → bright noon → sunset orange → silver moon → golden -->
-                                    <animate attributeName="fill"
-                                        values="#FFD700;#FFF176;#FF8C42;#D4E8FF;#D4E8FF;#FFB347;#FFD700"
-                                        keyTimes="0;0.26;0.48;0.58;0.90;0.96;1"
-                                        dur="120s" repeatCount="indefinite"/>
-                                    <!-- larger at noon, smaller as moon -->
-                                    <animate attributeName="r"
-                                        values="7;9;7;5.5;5.5;7"
-                                        keyTimes="0;0.26;0.48;0.58;0.90;1"
-                                        dur="120s" repeatCount="indefinite"/>
-                                    <!-- orbit arc: day (visible), night return (below frame) -->
-                                    <animateMotion
-                                        path="M 5,105 Q 50,-30 95,105 Q 50,130 5,105"
-                                        dur="120s" repeatCount="indefinite"/>
-                                </circle>
-                            </svg>
+                            <!-- Sky backdrop: real-time day/night based on current clock + server sunrise/sunset -->
+                            <div class="sky-panel" id="sky-panel">
+                                <div class="sky-orb" id="sky-orb"></div>
+                                <div class="sky-star" style="left:11%;top:14%"></div>
+                                <div class="sky-star" style="left:28%;top:8%"></div>
+                                <div class="sky-star" style="left:52%;top:18%"></div>
+                                <div class="sky-star" style="left:71%;top:10%"></div>
+                                <div class="sky-star" style="left:87%;top:22%"></div>
+                            </div>
                             <svg id="door-svg" class="door-svg" viewBox="0 0 80 100"
                                  xmlns="http://www.w3.org/2000/svg" aria-label="Door state">
                                 <defs>
@@ -2030,6 +2004,16 @@
             document.getElementById('python_version').textContent = data.python_version;
             document.getElementById('sunrise').textContent      = data.sunrise;
             document.getElementById('sunset').textContent       = data.sunset;
+            // Sync sky animation with real sunrise/sunset times
+            if (data.sunrise && data.sunrise.includes(':')) {
+                const [sh, sm] = data.sunrise.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(sm)) _sky_sunrise_h = sh + sm / 60;
+            }
+            if (data.sunset && data.sunset.includes(':')) {
+                const [sh, sm] = data.sunset.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(sm)) _sky_sunset_h = sh + sm / 60;
+            }
+            updateSky();
             document.getElementById('tu_open').textContent      = data.tu_open;
             document.getElementById('tu_close').textContent     = data.tu_close;
 
@@ -2490,6 +2474,10 @@
             /* Also init immediately if section is already open */
             if (_dvSection && _dvSection.style.display !== 'none') dvInit();
 
+            // Sky: initial render + update every minute
+            updateSky();
+            setInterval(updateSky, 60000);
+
             socket.on('connect_error', function(error) {
                 console.error('Failed to connect to server:', error);
                 openModal("Socket IO Connect error: " + (error.message || 'Unknown error'));
@@ -2549,6 +2537,66 @@
             const banner = document.getElementById('installBanner');
             if (banner) banner.style.display = 'none';
         });
+
+        /* ── Sky Animation ──────────────────────────────────── */
+        let _sky_sunrise_h = 6.5;   // updated from socket data
+        let _sky_sunset_h  = 19.5;  // updated from socket data
+
+        function updateSky() {
+            const panel = document.getElementById('sky-panel');
+            const orb   = document.getElementById('sky-orb');
+            if (!panel || !orb) return;
+
+            const now  = new Date();
+            const h    = now.getHours() + now.getMinutes() / 60;
+            const sr   = _sky_sunrise_h;
+            const ss   = _sky_sunset_h;
+            const dayLen   = ss - sr;
+            const nightLen = 24 - dayLen;
+
+            let bgTop, bgBot, orbColor, orbGlow, orbDiam, orbLeft, orbBottom;
+
+            if (h >= sr && h <= ss) {
+                // Daytime: sun arc left→peak→right
+                const t   = (h - sr) / dayLen;          // 0..1
+                const arc = Math.sin(t * Math.PI);       // 0→1→0, max at noon
+                orbLeft   = 5 + t * 90;                  // 5%..95%
+                orbBottom = 8 + arc * 76;                // near bottom at horizons, near top at noon
+                orbDiam   = 16 + arc * 8;                // 16px..24px
+
+                if (t < 0.12) {                          // Dawn
+                    bgTop = '#7B9DB9'; bgBot = '#FFAA60';
+                    orbColor = '#FFB347'; orbGlow = '0 0 14px 6px rgba(255,150,60,0.55)';
+                } else if (t > 0.88) {                   // Dusk
+                    bgTop = '#4A6880'; bgBot = '#FF6B35';
+                    orbColor = '#FF8C42'; orbGlow = '0 0 14px 6px rgba(255,110,50,0.60)';
+                } else {                                  // Day
+                    bgTop = '#1A6E9F'; bgBot = '#6EC6EA';
+                    orbColor = '#FFF176'; orbGlow = '0 0 18px 7px rgba(255,240,80,0.38)';
+                }
+                panel.classList.remove('is-night');
+            } else {
+                // Nighttime: moon arc
+                const nt  = h < sr
+                    ? (h + 24 - ss) / nightLen
+                    : (h - ss) / nightLen;               // 0..1
+                const arc = Math.sin(nt * Math.PI);
+                orbLeft   = 5 + nt * 90;
+                orbBottom = 8 + arc * 76;
+                orbDiam   = 13 + arc * 5;
+                bgTop = '#060E1C'; bgBot = '#0C1D35';
+                orbColor = '#D5EAFF'; orbGlow = '0 0 10px 4px rgba(190,215,255,0.32)';
+                panel.classList.add('is-night');
+            }
+
+            panel.style.background    = `linear-gradient(to bottom, ${bgTop}, ${bgBot})`;
+            orb.style.left            = orbLeft + '%';
+            orb.style.bottom          = orbBottom + '%';
+            orb.style.width           = orbDiam + 'px';
+            orb.style.height          = orbDiam + 'px';
+            orb.style.backgroundColor = orbColor;
+            orb.style.boxShadow       = orbGlow;
+        }
 
         /* ── Log Viewer ─────────────────────────────────────── */
         let _lv_allLines    = [];
