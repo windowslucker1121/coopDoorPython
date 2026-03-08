@@ -79,6 +79,16 @@ class DoorTaskRunner:
         # once the accumulated drive time reaches the reference-travel threshold.
         self.auto_close_cumulative_drive_s = 0.0
 
+        # Override-notification flag: fires once per window entry when the
+        # manual override switch blocks an auto-mode door command.
+        # Reset automatically whenever the override switch is inactive.
+        self.sentOverrideNotification = False
+
+        # Door position estimate (0.0 = fully closed, 1.0 = fully open).
+        # Authoritative at endstops; integrated from elapsed time otherwise.
+        self.door_position_estimate = 0.0
+        self._last_step_time = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -114,6 +124,7 @@ class DoorTaskRunner:
             door.clear_errorState()
             global_vars.instance().set_value("clear_error_state", False)
             self.sentErrorNotification = False
+            self.sentOverrideNotification = False
             # Also reset the premature-endstop retry state so the door gets
             # a clean slate after the operator acknowledges the error.
             self.auto_close_premature_count = 0
@@ -155,6 +166,14 @@ class DoorTaskRunner:
             # Get state and desired state:
             self.door_state = door.get_state()
             self.door_override = door.get_override()
+            # Reset the override-notification flag whenever the switch is
+            # inactive so it fires fresh the next time override blocks a window.
+            if not self.door_override:
+                self.sentOverrideNotification = False
+            # Compute time delta for door position estimate accumulation.
+            _now = time.time()
+            _dt = (_now - self._last_step_time) if self._last_step_time is not None else 0.0
+            self._last_step_time = _now
             d_door_state, auto_mode, reference_door_endstops_ms = (
                 global_vars.instance().get_values(
                     ["desired_door_state", "auto_mode", "reference_door_endstops_ms"]
@@ -211,6 +230,36 @@ class DoorTaskRunner:
                         and not self.auto_close_retry_pending
                     ):
                         global_vars.instance().set_value("desired_door_state", "closed")
+
+            elif auto_mode and self.door_override:
+                # Auto mode wants to move the door but the manual override
+                # switch is physically blocking it. Notify subscribers once
+                # per window entry (flag resets when override goes inactive).
+                if reference_door_endstops_ms is not None:
+                    self.sunrise, self.sunset = self._get_sunrise_sunset()
+                    sunrise_offset, sunset_offset = global_vars.instance().get_values(
+                        ["sunrise_offset", "sunset_offset"]
+                    )
+                    open_time = self.sunrise + timedelta(minutes=sunrise_offset)
+                    close_time = self.sunset + timedelta(minutes=sunset_offset)
+                    current_time = self._get_current_time()
+                    time_window = timedelta(minutes=1)
+                    window_active = (
+                        self.first_iter
+                        or (current_time >= open_time and current_time <= open_time + time_window)
+                        or (current_time >= close_time and current_time <= close_time + time_window)
+                    )
+                    if window_active and not self.sentOverrideNotification:
+                        self._send_notification(
+                            "Manual Override Active",
+                            "Auto-mode wants to move the door, "
+                            "but the manual override switch is active.",
+                        )
+                        logger.warning(
+                            "Auto-mode door command blocked by manual override "
+                            "during movement window."
+                        )
+                        self.sentOverrideNotification = True
 
             # Poll endstops every iteration as a reliable safety-net.
             # Edge-detect callbacks can be missed (bounce, gevent blocking,
@@ -475,6 +524,28 @@ class DoorTaskRunner:
             # iteration can detect a closing → closed transition.
             self.was_door_closing = self.door_state == "closing"
 
+            # Update door position estimate (0.0 = fully closed, 1.0 = fully open).
+            # Endstop states are authoritative; active movement integrates elapsed
+            # time against the reference travel time; stopped holds last value.
+            if self.door_state == "open":
+                self.door_position_estimate = 1.0
+            elif self.door_state == "closed":
+                self.door_position_estimate = 0.0
+            elif reference_door_endstops_ms is not None:
+                _ref_s = reference_door_endstops_ms / 1000.0
+                if self.door_state == "opening":
+                    self.door_position_estimate += _dt / _ref_s
+                elif self.door_state == "closing":
+                    self.door_position_estimate -= _dt / _ref_s
+                self.door_position_estimate = max(0.0, min(1.0, self.door_position_estimate))
+            # Emit -1 when position can't be estimated (no reference + not at endstop)
+            # so the frontend knows to fall back to CSS animations.
+            _emittable_position = (
+                round(self.door_position_estimate, 4)
+                if (self.door_state in ("open", "closed") or reference_door_endstops_ms is not None)
+                else -1
+            )
+
             global_vars.instance().set_values(
                 {
                     "state": self.door_state,
@@ -482,6 +553,7 @@ class DoorTaskRunner:
                     "sunrise": self.sunrise,
                     "sunset": self.sunset,
                     "error_state": door.errorState if door.ErrorState() else "",
+                    "door_position_estimate": _emittable_position,
                 }
             )
 

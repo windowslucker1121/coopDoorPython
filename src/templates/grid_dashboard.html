@@ -721,6 +721,12 @@
             animation: door-closing 2s ease-in-out infinite alternate;
         }
 
+        /* When JS drives the panel via door_position_estimate, suppress
+           keyframe animations so the inline transform takes full control. */
+        .door-svg.js-position #door-panel-group {
+            animation: none !important;
+        }
+
         /* Direction arrows */
         #door-arrow-up,
         #door-arrow-down {
@@ -1981,6 +1987,19 @@
                 }
             }
 
+            // Door position estimate: when the server provides a valid 0–1
+            // estimate (requires reference to be set), drive the SVG panel
+            // translateY directly for a smooth real-time animation.
+            // Falls back to the CSS keyframe animation when estimate is -1.
+            const doorPanel = document.getElementById('door-panel-group');
+            const pos = data.door_position_estimate;
+            if (typeof pos === 'number' && pos >= 0) {
+                doorSvg.classList.add('js-position');
+                doorPanel.style.transform = 'translateY(' + (-(pos * 76)).toFixed(1) + 'px)';
+            } else {
+                doorSvg.classList.remove('js-position');
+                doorPanel.style.transform = '';
+            }
 
             let error = data.errorstate;
             document.getElementById('error_section').style.display = error ? "block" : "none";

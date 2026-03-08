@@ -192,14 +192,16 @@ def get_all_data():
         sunrise, sunset, sunrise_offset, sunset_offset, \
         temp_in_min, temp_in_max, hum_in_min, hum_in_max, \
         temp_out_min, temp_out_max, hum_out_min, hum_out_max, \
-        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state, camera_enabled\
+        cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state, camera_enabled, \
+        door_position_estimate \
         = global_vars.instance().get_values(["temp_in", "hum_in", \
             "temp_out", "hum_out", "state", "override", "cpu_temp", \
             "sunrise", "sunset", "sunrise_offset", "sunset_offset", \
             "temp_in_min", "temp_in_max", "hum_in_min", "hum_in_max", \
             "temp_out_min", "temp_out_max", "hum_out_min", "hum_out_max", \
             "cpu_temp_min", "cpu_temp_max", \
-            "reference_door_endstops_ms", "auto_mode" , "error_state", "enable_camera"])
+            "reference_door_endstops_ms", "auto_mode" , "error_state", "enable_camera", \
+            "door_position_estimate"])
 
     # Check if time until sunrise is positive
     time_until_open_str = None
@@ -255,6 +257,7 @@ def get_all_data():
       'cpu_temp_max': format_temp(cpu_temp_max, units="C", convert_from_f=False),
       'state': state if state is not None else "",
       'override': state if state is not None and override else "off",
+      'door_position_estimate': door_position_estimate if isinstance(door_position_estimate, (int, float)) else -1,
       'uptime': str(get_uptime()),
       'sunrise': sunrise.strftime("%I:%M:%S %p").lstrip('0') if sunrise is not None else "",
       'sunset': sunset.strftime("%I:%M:%S %p").lstrip('0') if sunset is not None else "",
