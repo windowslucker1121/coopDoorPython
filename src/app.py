@@ -21,7 +21,7 @@ import ruamel.yaml as YAML
 import os.path
 from collections import deque
 import logging
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 import glob
 import sys
 from camera import Camera
@@ -765,30 +765,49 @@ def get_version():
 @app.route('/api/logs')
 def api_log_files():
     """Return list of available app log files, newest first."""
+    import re as _re
     log_dir = os.path.join(root_path, "log")
     files = []
     if os.path.isdir(log_dir):
-        for f in sorted(os.listdir(log_dir), reverse=True):
-            if f.endswith('.log'):
-                full_path = os.path.join(log_dir, f)
-                try:
-                    stat = os.stat(full_path)
-                    files.append({
-                        'name': f,
-                        'size': stat.st_size,
-                        'modified': stat.st_mtime
-                    })
-                except OSError:
-                    pass
+        for f in os.listdir(log_dir):
+            # Accept: app.log (current day), app.log.YYYY-MM-DD (daily rotations),
+            # and legacy app_YYYYMMDD_HHMMSS.log (old boot-timestamped) files.
+            is_log = (
+                f == 'app.log'
+                or (f.startswith('app.log.') and _re.match(r'^\d{4}-\d{2}-\d{2}$', f[8:]))
+                or (f.endswith('.log') and f.startswith('app_'))
+            )
+            if not is_log:
+                continue
+            full_path = os.path.join(log_dir, f)
+            try:
+                stat = os.stat(full_path)
+                files.append({
+                    'name': f,
+                    'size': stat.st_size,
+                    'modified': stat.st_mtime
+                })
+            except OSError:
+                pass
+    # Sort by modification time, newest first
+    files.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify(files)
 
 
 @app.route('/api/logs/<path:filename>')
 def api_log_content(filename):
     """Return parsed lines of a single app log file."""
+    import re as _re
     # Sanitize: strip any directory traversal
     filename = os.path.basename(filename)
-    if not filename.endswith('.log'):
+    # Accept: app.log (current day), app.log.YYYY-MM-DD (daily rotations),
+    # and legacy app_YYYYMMDD_HHMMSS.log (old boot-timestamped) files.
+    _valid_log = (
+        filename == 'app.log'
+        or (filename.startswith('app.log.') and _re.match(r'^\d{4}-\d{2}-\d{2}$', filename[8:]))
+        or (filename.endswith('.log') and filename.startswith('app_'))
+    )
+    if not _valid_log:
         return jsonify({'error': 'Invalid file type'}), 400
 
     log_dir = os.path.join(root_path, "log")
@@ -996,40 +1015,19 @@ def configure_logging():
     log_dir = os.path.join(root_path, "log")
     os.makedirs(log_dir, exist_ok=True)
 
-    MAX_LOG_FILES = 5  # maximum number of base log files to keep across sessions
+    # Daily-rotating file handler: app.log (today) rolls over at midnight to
+    # app.log.YYYY-MM-DD, keeping 30 days of history automatically.
+    log_filename = os.path.join(log_dir, "app.log")
 
-    # Collect all existing base log files for this app and sort oldest-first.
-    existing_base_logs = sorted(
-        glob.glob(os.path.join(log_dir, "app_*.log")),
-        key=os.path.getmtime
-    )
-
-    # Remove oldest base files (and their rotated siblings) so that adding the
-    # new file keeps the total at or below MAX_LOG_FILES.
-    while len(existing_base_logs) >= MAX_LOG_FILES:
-        oldest = existing_base_logs.pop(0)
-        try:
-            os.remove(oldest)
-        except OSError:
-            pass
-        # Remove rotated copies (.1, .2, …) created by RotatingFileHandler.
-        for rotated in glob.glob(oldest + ".*"):
-            try:
-                os.remove(rotated)
-            except OSError:
-                pass
-
-    # Create a new log file whose name encodes the current boot time.
-    boot_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = os.path.join(log_dir, f"app_{boot_timestamp}.log")
-
-    rotating_file_handler = RotatingFileHandler(
+    rotating_file_handler = TimedRotatingFileHandler(
         log_filename,
-        maxBytes=500 * 1024 * 1024,  # 500 MB per file
-        backupCount=4                  # 4 rotated copies + 1 active = 5 files max
+        when='midnight',    # rotate at midnight each day
+        interval=1,
+        backupCount=30,     # keep 30 days of history
+        encoding='utf-8'
     )
     rotating_file_handler.setFormatter(formatter)
-    if not any(isinstance(h, RotatingFileHandler) for h in rootLogger.handlers):
+    if not any(isinstance(h, (RotatingFileHandler, TimedRotatingFileHandler)) for h in rootLogger.handlers):
         rootLogger.addHandler(rotating_file_handler)
 
     # Set the log level for the geventwebsocket handler because it is too verbose

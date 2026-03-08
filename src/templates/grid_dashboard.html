@@ -1684,7 +1684,7 @@
                                 title="Select a date to view">
                             <option value="">&#x2014; loading&#x2026; &#x2014;</option>
                         </select>
-                        <button class="dv-icon-btn" onclick="dvLoadFile()" title="Refresh chart">&#x21BB; Refresh</button>
+                        <button class="dv-icon-btn" onclick="dvRefresh()" title="Refresh file list and chart">&#x21BB; Refresh</button>
                     </div>
                     <span class="dv-stat" id="dv-stat"></span>
                 </div>
@@ -2059,14 +2059,12 @@
         let _dv_rows    = [];
         let _dv_inited  = false;
 
-        async function dvInit() {
-            if (_dv_inited) return;
-            _dv_inited = true;
-            dvShowLoading();
+        async function dvRefreshFiles() {
             try {
                 const res   = await fetch('/api/csv');
                 const files = await res.json();
                 const sel   = document.getElementById('dv-file-select');
+                const prev  = sel.value;
                 sel.innerHTML = '<option value="">\u2014 select a date \u2014</option>';
                 files.forEach(f => {
                     const opt   = document.createElement('option');
@@ -2074,8 +2072,26 @@
                     opt.textContent = f.name.replace('.csv','').replace(/_/g,'-');
                     sel.appendChild(opt);
                 });
-                if (files.length > 0) {
+                // Preserve the current selection; fall back to newest if it's gone
+                if (prev && [...sel.options].some(o => o.value === prev)) {
+                    sel.value = prev;
+                } else if (files.length > 0) {
                     sel.value = files[0].name;
+                }
+                return files;
+            } catch(e) {
+                console.error('[DV] file list refresh error', e);
+                return [];
+            }
+        }
+
+        async function dvInit() {
+            if (_dv_inited) return;
+            _dv_inited = true;
+            dvShowLoading();
+            try {
+                const files = await dvRefreshFiles();
+                if (files.length > 0) {
                     await dvLoadFile();
                 } else {
                     dvShowEmpty('No CSV data files found.');
@@ -2083,6 +2099,12 @@
             } catch(e) {
                 dvShowEmpty('Could not load file list: ' + e.message);
             }
+        }
+
+        // Refreshes both the file-list dropdown and the chart data for the selected file.
+        async function dvRefresh() {
+            await dvRefreshFiles();
+            await dvLoadFile();
         }
 
         async function dvLoadFile() {
@@ -2357,8 +2379,11 @@
             const _dvSection = document.getElementById('dataVisualizationSection');
             const _dvObserver = new MutationObserver(() => {
                 if (_dvSection.style.display !== 'none') {
-                    dvInit();
-                    _dvObserver.disconnect();
+                    if (!_dv_inited) {
+                        dvInit(); // first open: full initialisation
+                    } else {
+                        dvRefreshFiles(); // subsequent opens: just refresh the file list
+                    }
                 }
             });
             _dvObserver.observe(_dvSection, { attributes: true, attributeFilter: ['style'] });
