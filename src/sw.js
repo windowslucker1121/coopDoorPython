@@ -54,6 +54,10 @@ self.addEventListener('message', (event) => {
 // Fetch event
 self.addEventListener('fetch', (event) => {
   if (event.request.method === 'GET') {
+    if (new URL(event.request.url).pathname.startsWith('/api/')) {
+      event.respondWith(fetch(event.request));
+      return;
+    }
     if (event.request.mode === 'navigate') {
       event.respondWith(
         fetch(event.request)

@@ -762,6 +762,16 @@ def get_version():
 
 # ── Log Viewer API ────────────────────────────────────────────────────────────
 
+@app.after_request
+def add_no_cache_headers(response):
+    """Prevent browsers and service workers from caching any /api/* response."""
+    if request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
 @app.route('/api/logs')
 def api_log_files():
     """Return list of available app log files, newest first."""
@@ -1033,6 +1043,9 @@ def configure_logging():
     # Set the log level for the geventwebsocket handler because it is too verbose
     gws_logger = logging.getLogger("geventwebsocket.handler")
     gws_logger.setLevel(logging.WARNING)
+
+    logging.getLogger("urllib3").setLevel(logging.INFO)
+    logging.getLogger("location_temperature_sensor").setLevel(logging.INFO)
 
     return rootLogger
 
