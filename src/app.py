@@ -239,7 +239,7 @@ def get_all_data():
 
     # Return nicely formatted data in dictionary form:
     data_dict = {
-      'time': datetime.now().strftime("%I:%M:%S.%f %p")[:-3],
+      'time': datetime.now().strftime("%H:%M:%S.%f")[:-3],
       'temp_in': format_temp(temp_in),
       'temp_in_min': format_temp(temp_in_min),
       'temp_in_max': format_temp(temp_in_max),
