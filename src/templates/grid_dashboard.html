@@ -2004,15 +2004,23 @@
             document.getElementById('python_version').textContent = data.python_version;
             document.getElementById('sunrise').textContent      = data.sunrise;
             document.getElementById('sunset').textContent       = data.sunset;
-            // Sync sky animation with real sunrise/sunset times
-            if (data.sunrise && data.sunrise.includes(':')) {
-                const [sh, sm] = data.sunrise.split(':').map(Number);
-                if (!isNaN(sh) && !isNaN(sm)) _sky_sunrise_h = sh + sm / 60;
+            // Sync sky animation with real sunrise/sunset times.
+            // Server format: "6:35:00 AM" / "7:12:00 PM" (%I:%M:%S %p, 12-hour)
+            function parseTime12h(str) {
+                if (!str) return NaN;
+                const m = str.match(/(\d+):(\d+).*?(AM|PM)/i);
+                if (!m) return NaN;
+                let h = parseInt(m[1], 10);
+                const min = parseInt(m[2], 10);
+                const pm = m[3].toUpperCase() === 'PM';
+                if (h === 12) h = pm ? 12 : 0;
+                else if (pm)  h += 12;
+                return h + min / 60;
             }
-            if (data.sunset && data.sunset.includes(':')) {
-                const [sh, sm] = data.sunset.split(':').map(Number);
-                if (!isNaN(sh) && !isNaN(sm)) _sky_sunset_h = sh + sm / 60;
-            }
+            const sr = parseTime12h(data.sunrise);
+            const ss = parseTime12h(data.sunset);
+            if (!isNaN(sr)) _sky_sunrise_h = sr;
+            if (!isNaN(ss)) _sky_sunset_h  = ss;
             updateSky();
             document.getElementById('tu_open').textContent      = data.tu_open;
             document.getElementById('tu_close').textContent     = data.tu_close;
