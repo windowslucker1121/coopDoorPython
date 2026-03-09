@@ -257,7 +257,7 @@ def get_all_data():
       'cpu_temp_max': format_temp(cpu_temp_max, units="C", convert_from_f=False),
       'state': state if state is not None else "",
       'override': state if state is not None and override else "off",
-      'door_position_estimate': door_position_estimate if isinstance(door_position_estimate, (int, float)) else -1,
+      'door_position_estimate': str(door_position_estimate) if isinstance(door_position_estimate, (int, float)) else str(-1),
       'uptime': str(get_uptime()),
       'sunrise': sunrise.strftime("%I:%M:%S %p").lstrip('0') if sunrise is not None else "",
       'sunset': sunset.strftime("%I:%M:%S %p").lstrip('0') if sunset is not None else "",
@@ -415,9 +415,12 @@ def data_log_task():
                     file.write(header)
 
         # Append data to file:
-        with open(log_file_name, 'a') as file:
-            row = ", ".join(data.values()) + "\n"
-            file.write(row)
+        try:
+            with open(log_file_name, 'a') as file:
+                row = ", ".join(str(v) for v in data.values()) + "\n"
+                file.write(row)
+        except Exception as e:
+            logger.error(f"data_log_task: failed to write row: {e}")
 
         # Sleep a bit:
         last_log_file_name = log_file_name
