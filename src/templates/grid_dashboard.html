@@ -2065,8 +2065,8 @@
             // translateY directly for a smooth real-time animation.
             // Falls back to the CSS keyframe animation when estimate is -1.
             const doorPanel = document.getElementById('door-panel-group');
-            const pos = data.door_position_estimate;
-            if (typeof pos === 'number' && pos >= 0) {
+            const pos = parseFloat(data.door_position_estimate);
+            if (!isNaN(pos) && pos >= 0) {
                 doorSvg.classList.add('js-position');
                 doorPanel.style.transform = 'translateY(' + (-(pos * 76)).toFixed(1) + 'px)';
             } else {
