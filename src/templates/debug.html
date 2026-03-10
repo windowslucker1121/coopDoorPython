@@ -158,12 +158,39 @@
         .badge-dead   { background: var(--low);  color: #fff; }
         .badge-daemon { background: #9b59b6; color: #fff; }
 
+        /* ── GPIO Config form ─────────────────────────── */
+        .gpio-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+        .gpio-field { display: flex; flex-direction: column; gap: 3px; font-size: 0.82rem; }
+        .gpio-field label { font-weight: 600; color: var(--text-muted); font-size: 0.75rem; }
+        .gpio-field input[type="number"] {
+            padding: 5px 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface-alt);
+            color: var(--text);
+            font-size: 0.82rem;
+            width: 100%;
+        }
+        .gpio-field input:focus { outline: 2px solid var(--accent); }
+        .gpio-field.full-width { grid-column: 1 / -1; }
+        .gpio-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
+        .gpio-checkbox-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .gpio-actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+        .btn { padding: 7px 18px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 0.82rem; transition: opacity 0.2s; }
+        .btn:hover { opacity: 0.8; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-secondary { background: var(--surface-alt); color: var(--text); border: 1px solid var(--border); }
+        .gpio-status { grid-column: 1 / -1; font-size: 0.78rem; padding: 6px 10px; border-radius: 6px; display: none; }
+        .gpio-status.success { background: #d4edda; color: #155724; display: block; }
+        .gpio-status.error   { background: #f8d7da; color: #721c24; display: block; }
+
         /* ── Responsive ───────────────────────────────── */
         @media (max-width: 600px) {
             body { padding: 8px; }
             .card { padding: 12px; }
             table { font-size: 0.75rem; }
             th, td { padding: 4px 6px; }
+            .gpio-form { grid-template-columns: 1fr; }
         }
 
         /* ── Collapsible section ──────────────────────── */
@@ -211,6 +238,81 @@
             <table>
                 <tbody id="doorTable"></tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- ── GPIO Pin Configuration ────────────────── -->
+    <div class="card">
+        <h2 onclick="toggleSection('gpioConfigSection', this)">⚙️ GPIO Pin Configuration <span class="chevron">▼</span></h2>
+        <div id="gpioConfigSection" class="section-body">
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
+                Pin numbers use BCM numbering. Motor, endstop and sensor pin changes require a
+                <strong>restart</strong> to take effect. Invert flags and reference timeout
+                are applied immediately.
+            </p>
+            <form class="gpio-form" id="gpioForm" onsubmit="return false;">
+                <div class="gpio-field">
+                    <label>Motor IN1 — UP (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_motor_in1" name="motor_in1">
+                </div>
+                <div class="gpio-field">
+                    <label>Motor IN2 — DOWN (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_motor_in2" name="motor_in2">
+                </div>
+                <div class="gpio-field">
+                    <label>Motor ENA — Enable (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_motor_ena" name="motor_ena">
+                </div>
+                <div class="gpio-field">
+                    <label>Reference Sequence Timeout (s)</label>
+                    <input type="number" min="5" max="600" id="gp_reference_timeout" name="reference_timeout">
+                </div>
+                <div class="gpio-field">
+                    <label>Endstop UP (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_endstop_up" name="endstop_up">
+                </div>
+                <div class="gpio-field">
+                    <label>Endstop DOWN (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_endstop_down" name="endstop_down">
+                </div>
+                <div class="gpio-field">
+                    <label class="gpio-checkbox-row">
+                        <input type="checkbox" id="gp_invert_end_up" name="invert_end_up">
+                        Invert Endstop UP signal
+                    </label>
+                </div>
+                <div class="gpio-field">
+                    <label class="gpio-checkbox-row">
+                        <input type="checkbox" id="gp_invert_end_down" name="invert_end_down">
+                        Invert Endstop DOWN signal
+                    </label>
+                </div>
+                <div class="gpio-field">
+                    <label>Manual Open Switch (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_override_open" name="override_open">
+                </div>
+                <div class="gpio-field">
+                    <label>Manual Close Switch (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_override_close" name="override_close">
+                </div>
+                <div class="gpio-field">
+                    <label>DHT11 Indoor Data (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_dht11_data" name="dht11_data">
+                </div>
+                <div class="gpio-field">
+                    <label>DHT22 Outdoor Data (BCM)</label>
+                    <input type="number" min="0" max="40" id="gp_dht22_data" name="dht22_data">
+                </div>
+                <div class="gpio-field full-width">
+                    <label>DHT22 Outdoor Power (BCM, leave 0 to disable power cycling)</label>
+                    <input type="number" min="0" max="40" id="gp_dht22_power" name="dht22_power">
+                </div>
+                <div id="gpioStatus" class="gpio-status"></div>
+                <div class="gpio-actions">
+                    <button type="button" class="btn btn-primary" onclick="saveGpioConfig()">💾 Save to config.yaml</button>
+                    <button type="button" class="btn btn-secondary" onclick="loadGpioConfig()">↺ Reload from server</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -363,6 +465,72 @@
         }
         requestDebugData();
         setInterval(requestDebugData, 1000);
+
+        // ── GPIO Config ─────────────────────────────
+        const GPIO_FIELDS = [
+            'motor_in1','motor_in2','motor_ena',
+            'endstop_up','endstop_down',
+            'override_open','override_close',
+            'dht11_data','dht22_data','dht22_power',
+            'reference_timeout',
+        ];
+        const GPIO_BOOL_FIELDS = ['invert_end_up','invert_end_down'];
+
+        function loadGpioConfig() {
+            fetch('/api/gpio-config')
+                .then(r => r.json())
+                .then(cfg => {
+                    GPIO_FIELDS.forEach(k => {
+                        const el = document.getElementById('gp_' + k);
+                        if (el && cfg[k] !== undefined) el.value = cfg[k];
+                    });
+                    GPIO_BOOL_FIELDS.forEach(k => {
+                        const el = document.getElementById('gp_' + k);
+                        if (el && cfg[k] !== undefined) el.checked = !!cfg[k];
+                    });
+                    showGpioStatus('Loaded from server.', 'success', 1500);
+                })
+                .catch(e => showGpioStatus('Failed to load: ' + e, 'error'));
+        }
+
+        function saveGpioConfig() {
+            const payload = {};
+            GPIO_FIELDS.forEach(k => {
+                const el = document.getElementById('gp_' + k);
+                if (el) payload[k] = parseInt(el.value, 10);
+            });
+            GPIO_BOOL_FIELDS.forEach(k => {
+                const el = document.getElementById('gp_' + k);
+                if (el) payload[k] = el.checked;
+            });
+
+            fetch('/api/gpio-config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (ok) {
+                    showGpioStatus('✔ ' + data.message, 'success');
+                } else {
+                    showGpioStatus('✖ ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(e => showGpioStatus('Network error: ' + e, 'error'));
+        }
+
+        function showGpioStatus(msg, type, autoDismissMs) {
+            const el = document.getElementById('gpioStatus');
+            el.textContent = msg;
+            el.className = 'gpio-status ' + type;
+            if (autoDismissMs) {
+                setTimeout(() => { el.className = 'gpio-status'; }, autoDismissMs);
+            }
+        }
+
+        // Load GPIO config on page load
+        loadGpioConfig();
     </script>
 </body>
 </html>

@@ -99,6 +99,22 @@ root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 config_filename = os.path.join(root_path, "config.yaml")
 config_lock = Lock()
 
+GPIO_DEFAULTS = {
+    "motor_in1": 17,
+    "motor_in2": 27,
+    "motor_ena": 22,
+    "endstop_up": 23,
+    "endstop_down": 24,
+    "override_open": 5,
+    "override_close": 6,
+    "dht11_data": 26,
+    "dht22_data": 21,
+    "dht22_power": 20,
+    "invert_end_up": False,
+    "invert_end_down": False,
+    "reference_timeout": 60,
+}
+
 def save_config():
     with config_lock:
         with open(config_filename, 'w') as file:
@@ -112,7 +128,8 @@ def save_config():
                 "csvLog": global_vars.instance().get_value("csvLog"),
                 "enable_camera" : global_vars.instance().get_value("enable_camera"),
                 "camera_index" : global_vars.instance().get_value("camera_index"),
-                "outdoor_sensor_type": global_vars.instance().get_value("outdoor_sensor_type")
+                "outdoor_sensor_type": global_vars.instance().get_value("outdoor_sensor_type"),
+                "gpio": global_vars.instance().get_value("gpio"),
             }
             yaml.dump(to_dump, file)
 
@@ -137,12 +154,18 @@ def load_config():
             "camera_index" : 0,
             # Outdoor sensor backend: "dht22" (physical sensor) or "api" (Open-Meteo)
             "outdoor_sensor_type": "dht22",
+            "gpio": dict(GPIO_DEFAULTS),
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
                 yaml = YAML.YAML()
                 content = file.read()
                 yaml_config = yaml.load(content)
+                # Merge gpio sub-dict with defaults so missing keys fall back gracefully
+                if "gpio" in yaml_config and isinstance(yaml_config["gpio"], dict):
+                    merged_gpio = dict(GPIO_DEFAULTS)
+                    merged_gpio.update(yaml_config["gpio"])
+                    yaml_config["gpio"] = merged_gpio
                 config_to_set.update(yaml_config)
         else:
             saveNewConfig = True
@@ -284,7 +307,13 @@ def get_all_data():
 ##################################
 
 def temperature_task():
-    data_pin_in = board.D26          # DHT11 inside sensor on GPIO 26
+    gpio_cfg = global_vars.instance().get_value("gpio") or {}
+    dht11_pin_num  = int(gpio_cfg.get("dht11_data",  26))
+    dht22_pin_num  = int(gpio_cfg.get("dht22_data",  21))
+    dht22_power_num = gpio_cfg.get("dht22_power", 20)
+    dht22_power_num = int(dht22_power_num) if dht22_power_num is not None else None
+
+    data_pin_in = getattr(board, f"D{dht11_pin_num}", dht11_pin_num)
     dht_in = DHT11(data_pin_in)
 
     outdoor_sensor_type = global_vars.instance().get_value("outdoor_sensor_type") or "dht22"
@@ -295,8 +324,8 @@ def temperature_task():
         )
     else:
         logger.info("temperature_task: using DHT22 hardware sensor for outdoor readings")
-        data_pin_out = board.D21
-        dht_out = DHT22(data_pin_out, power_pin=20)
+        data_pin_out = getattr(board, f"D{dht22_pin_num}", dht22_pin_num)
+        dht_out = DHT22(data_pin_out, power_pin=dht22_power_num)
     last_date = None
 
     # Update value in global vars, and also store min and max seen since startup:
@@ -579,19 +608,19 @@ def handle_mock_trigger_pin(data):
 @socketio.on('get_debug_data')
 def handle_get_debug_data():
     import door as door_module
-    # Pin metadata
+    # Build pin metadata from live config so it reflects any saved changes
+    gpio_cfg = global_vars.instance().get_value("gpio") or {}
     pin_meta = {
-        17: {"name": "in1", "purpose": "Motor UP", "direction": "OUT"},
-        27: {"name": "in2", "purpose": "Motor DOWN", "direction": "OUT"},
-        22: {"name": "ena", "purpose": "Motor Enable", "direction": "OUT"},
-        23: {"name": "end_up", "purpose": "Endstop UP", "direction": "IN"},
-        24: {"name": "end_down", "purpose": "Endstop DOWN", "direction": "IN"},
-        5:  {"name": "o_pin", "purpose": "Manual Open Switch", "direction": "IN"},
-        6:  {"name": "c_pin", "purpose": "Manual Close Switch", "direction": "IN"},
-        21: {"name": "data_pin_out", "purpose": "DHT22 Outdoor Data", "direction": "IN"},
-        16: {"name": "data_pin_in", "purpose": "DHT22 Indoor Data", "direction": "IN"},
-        20: {"name": "power_pin_out", "purpose": "DHT22 Outdoor Power", "direction": "OUT"},
-        26: {"name": "power_pin_in", "purpose": "DHT22 Indoor Power", "direction": "OUT"},
+        int(gpio_cfg.get("motor_in1",    17)): {"name": "motor_in1",    "purpose": "Motor UP",              "direction": "OUT"},
+        int(gpio_cfg.get("motor_in2",    27)): {"name": "motor_in2",    "purpose": "Motor DOWN",            "direction": "OUT"},
+        int(gpio_cfg.get("motor_ena",    22)): {"name": "motor_ena",    "purpose": "Motor Enable",          "direction": "OUT"},
+        int(gpio_cfg.get("endstop_up",   23)): {"name": "endstop_up",   "purpose": "Endstop UP",            "direction": "IN"},
+        int(gpio_cfg.get("endstop_down", 24)): {"name": "endstop_down", "purpose": "Endstop DOWN",          "direction": "IN"},
+        int(gpio_cfg.get("override_open",  5)): {"name": "override_open",  "purpose": "Manual Open Switch",  "direction": "IN"},
+        int(gpio_cfg.get("override_close", 6)): {"name": "override_close", "purpose": "Manual Close Switch", "direction": "IN"},
+        int(gpio_cfg.get("dht22_data",   21)): {"name": "dht22_data",   "purpose": "DHT22 Outdoor Data",    "direction": "IN"},
+        int(gpio_cfg.get("dht11_data",   26)): {"name": "dht11_data",   "purpose": "DHT11 Indoor Data",     "direction": "IN"},
+        int(gpio_cfg.get("dht22_power",  20)): {"name": "dht22_power",  "purpose": "DHT22 Outdoor Power",   "direction": "OUT"},
     }
 
     # Get GPIO pin states
@@ -627,9 +656,16 @@ def handle_get_debug_data():
 
     # Door module constants
     door_constants = {
+        "in1 (Motor UP)":         door_module.in1,
+        "in2 (Motor DOWN)":       door_module.in2,
+        "ena (Motor Enable)":     door_module.ena,
+        "end_up (Endstop UP)":    door_module.end_up,
+        "end_down (Endstop DOWN)":door_module.end_down,
+        "o_pin (Manual Open)":    door_module.o_pin,
+        "c_pin (Manual Close)":   door_module.c_pin,
+        "invert_end_up":          door_module.invert_end_up,
+        "invert_end_down":        door_module.invert_end_down,
         "referenceSequenceTimeout": door_module.referenceSequenceTimeout,
-        "invert_end_up": door_module.invert_end_up,
-        "invert_end_down": door_module.invert_end_down,
     }
 
     # All global variables (mask secrets)
@@ -947,6 +983,83 @@ def api_csv_content(filename):
     except Exception as e:
         logger.error(f"Error reading CSV file {filename}: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ── GPIO Config API ───────────────────────────────────────────────────────────
+
+_GPIO_PIN_FIELDS = [
+    "motor_in1", "motor_in2", "motor_ena",
+    "endstop_up", "endstop_down",
+    "override_open", "override_close",
+    "dht11_data", "dht22_data", "dht22_power",
+]
+_GPIO_BOOL_FIELDS = ["invert_end_up", "invert_end_down"]
+
+
+@app.route('/api/gpio-config', methods=['GET'])
+def api_get_gpio_config():
+    """Return the current GPIO pin configuration."""
+    gpio = global_vars.instance().get_value("gpio") or dict(GPIO_DEFAULTS)
+    return jsonify(gpio)
+
+
+@app.route('/api/gpio-config', methods=['POST'])
+def api_set_gpio_config():
+    """Persist updated GPIO pin configuration to config.yaml.
+
+    A restart is required for motor/sensor pin changes to take effect.
+    Boolean fields (invert_end_up, invert_end_down) and reference_timeout
+    are applied immediately to the running door module.
+    """
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': 'JSON body required'}), 400
+
+    existing = dict(global_vars.instance().get_value("gpio") or GPIO_DEFAULTS)
+    errors = []
+
+    for field in _GPIO_PIN_FIELDS:
+        if field not in data:
+            continue
+        try:
+            val = int(data[field])
+            if not (0 <= val <= 40):
+                errors.append(f"'{field}' must be 0–40")
+                continue
+            existing[field] = val
+        except (ValueError, TypeError):
+            errors.append(f"'{field}' must be an integer")
+
+    for field in _GPIO_BOOL_FIELDS:
+        if field in data:
+            existing[field] = bool(data[field])
+
+    if "reference_timeout" in data:
+        try:
+            val = int(data["reference_timeout"])
+            if not (5 <= val <= 600):
+                errors.append("'reference_timeout' must be 5–600 seconds")
+            else:
+                existing["reference_timeout"] = val
+        except (ValueError, TypeError):
+            errors.append("'reference_timeout' must be an integer")
+
+    if errors:
+        return jsonify({'error': '; '.join(errors)}), 400
+
+    global_vars.instance().set_value("gpio", existing)
+    save_config()
+
+    # Apply invert flags and timeout to the running door module immediately
+    import door as _door_mod
+    _door_mod.invert_end_up    = existing["invert_end_up"]
+    _door_mod.invert_end_down  = existing["invert_end_down"]
+    _door_mod.referenceSequenceTimeout = existing["reference_timeout"]
+
+    return jsonify({
+        'message': 'GPIO config saved. Restart required for pin changes to take effect.',
+        'gpio': existing,
+    })
 
 
 @app.route('/update', methods=['POST'])

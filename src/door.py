@@ -40,6 +40,20 @@ c_pin = 6
 
 class DOOR():
     def __init__(self):
+        # Load GPIO pin config from persistent config (falls back to module-level defaults)
+        global in1, in2, ena, end_up, end_down, invert_end_up, invert_end_down, o_pin, c_pin, referenceSequenceTimeout
+        gpio_cfg = global_vars.instance().get_value("gpio") or {}
+        in1                    = int(gpio_cfg.get("motor_in1",       in1))
+        in2                    = int(gpio_cfg.get("motor_in2",       in2))
+        ena                    = int(gpio_cfg.get("motor_ena",       ena))
+        end_up                 = int(gpio_cfg.get("endstop_up",      end_up))
+        end_down               = int(gpio_cfg.get("endstop_down",    end_down))
+        o_pin                  = int(gpio_cfg.get("override_open",   o_pin))
+        c_pin                  = int(gpio_cfg.get("override_close",  c_pin))
+        invert_end_up          = bool(gpio_cfg.get("invert_end_up",  invert_end_up))
+        invert_end_down        = bool(gpio_cfg.get("invert_end_down",invert_end_down))
+        referenceSequenceTimeout = int(gpio_cfg.get("reference_timeout", referenceSequenceTimeout))
+
         # Define state and pins used
         self.state = "stopped"
         self.lastState = "stopped"
