@@ -1357,6 +1357,13 @@
         .dv-door-stopped { color: var(--btn-stop);      }
 
     </style>
+    <!-- Apply saved theme immediately to prevent flash of wrong theme on load -->
+    <script>
+        (function() {
+            const t = localStorage.getItem('theme');
+            if (t) document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body>
 
@@ -2486,12 +2493,24 @@
             updateSky();
             setInterval(updateSky, 60000);
 
+            // Only show the error modal after a sustained connection failure.
+            // A brief connect_error on PWA resume (minimise → reopen) resolves
+            // itself within a second or two, so we wait 5 s before bothering the user.
+            let _connectErrorTimer = null;
+
             socket.on('connect_error', function(error) {
                 console.error('Failed to connect to server:', error);
-                openModal("Socket IO Connect error: " + (error.message || 'Unknown error'));
+                if (!_connectErrorTimer) {
+                    _connectErrorTimer = setTimeout(function() {
+                        openModal("Socket IO Connect error: " + (error.message || 'Unknown error'));
+                    }, 5000);
+                }
             });
 
-            socket.on('connect', function() { closeModal(); });
+            socket.on('connect', function() {
+                if (_connectErrorTimer) { clearTimeout(_connectErrorTimer); _connectErrorTimer = null; }
+                closeModal();
+            });
 
             const themeButton   = document.getElementById('toggleTheme');
             const currentTheme  = localStorage.getItem('theme') || 'light';
