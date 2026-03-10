@@ -42,16 +42,22 @@ def main():
     # Restart the app
     print("Restarting app...")
     app_path = sys.argv[1]
-    
-    # Change back to the app directory
-    os.chdir(os.path.dirname(app_path))
-    
-    # Start the app
+    service_name = sys.argv[3] if len(sys.argv) > 3 else None
+
     if os.name == 'nt':
-        # Windows
+        # Windows: direct relaunch
+        os.chdir(os.path.dirname(app_path))
         subprocess.Popen([sys.executable, app_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    elif service_name:
+        # Running under systemd: ask systemd to restart the service.
+        # Requires KillMode=process in the service file (so this script is not
+        # killed when the main process exits) and sudo NOPASSWD for systemctl
+        # restart (the pi user has this by default on Raspberry Pi OS).
+        print(f"Restarting systemd service: {service_name}")
+        subprocess.run(['sudo', 'systemctl', 'restart', service_name], check=False)
     else:
-        # Linux
+        # Direct launch (no systemd)
+        os.chdir(os.path.dirname(app_path))
         subprocess.Popen([sys.executable, app_path], preexec_fn=os.setpgrp)
 
 if __name__ == "__main__":

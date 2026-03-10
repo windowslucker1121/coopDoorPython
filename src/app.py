@@ -963,10 +963,24 @@ def update_app():
     app_path = os.path.abspath(__file__)
     
     pid = str(os.getpid())
+    service_name = ''
+    if os.name != 'nt' and os.environ.get('INVOCATION_ID'):
+        try:
+            service_name = subprocess.check_output(
+                ['systemctl', 'show', '--value', '-p', 'Id', '--pid', pid],
+                text=True
+            ).strip()  # e.g. 'chicken.service'
+        except Exception:
+            pass
+
+    cmd = [sys.executable, update_script_path, app_path, pid]
+    if service_name:
+        cmd.append(service_name)
+
     if os.name == 'nt':
-        subprocess.Popen([sys.executable, update_script_path, app_path, pid], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        subprocess.Popen([sys.executable, update_script_path, app_path, pid], preexec_fn=os.setpgrp)
+        subprocess.Popen(cmd, preexec_fn=os.setpgrp)
     
     def shutdown():
         time.sleep(1)

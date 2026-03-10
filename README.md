@@ -51,11 +51,68 @@ $ killall libgpiod_pulsein64
 
 ## Run Automatically at Startup
 
-To start the controller automatically at boot, run `crontab -e` and append the following entry:
+### Option A — systemd service (recommended)
+
+Running as a systemd service gives you automatic restart on failure and proper integration with the built-in **Update** button in the web UI.
+
+1. Create the service file:
+
+```bash
+sudo nano /etc/systemd/system/chicken.service
+```
+
+2. Paste the following content:
+
+```ini
+[Unit]
+Description=Coop / Chicken Door Application
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/coopDoorPython/
+ExecStart=/home/pi/coopDoorPython/venv/bin/python /home/pi/coopDoorPython/src/app.py
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> **Note:** `KillMode=process` is required so that the update helper script (`update_script.py`) is not killed by systemd when the main process exits during an update. Without it the app will not restart after clicking the Update button.
+
+3. Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable chicken
+sudo systemctl start chicken
+```
+
+4. Check that it is running:
+
+```bash
+sudo systemctl status chicken
+```
+
+**Useful commands:**
+
+| Action | Command |
+|--------|---------|
+| View live logs | `journalctl -u chicken -f` |
+| Stop the service | `sudo systemctl stop chicken` |
+| Restart the service | `sudo systemctl restart chicken` |
+| Disable auto-start | `sudo systemctl disable chicken` |
+
+### Option B — cron (legacy)
+
+To start the controller automatically at boot via cron, run `crontab -e` and append the following entry:
 
 ```
-@reboot /home/pi/coop/cron_script.sh
+@reboot /home/pi/coopDoorPython/cron_script.sh
 ```
+
+> **Note:** The Update button in the web UI does **not** work reliably with this option because cron does not restart the process after an update. Use the systemd service (Option A) if you need the Update button to work.
 
 ## Network Monitoring
 
