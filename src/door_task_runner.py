@@ -180,7 +180,6 @@ class DoorTaskRunner:
                 )
             )
 
-            auto_mode = auto_mode == "True"
             door.set_auto_mode(auto_mode)
 
             if d_door_state != self.last_d_door_state:
@@ -195,7 +194,7 @@ class DoorTaskRunner:
                         "Reference door endstops not set. Please run the reference "
                         "door endstops sequence from the WebUI - disabling auto mode."
                     )
-                    global_vars.instance().set_value("auto_mode", "False")
+                    global_vars.instance().set_value("auto_mode", False)
                 else:
                     self.sunrise, self.sunset = self._get_sunrise_sunset()
                     sunrise_offset, sunset_offset = global_vars.instance().get_values(

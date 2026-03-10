@@ -104,7 +104,7 @@ def _make_runner(
 
 def _init_gv(
     *,
-    auto_mode: str = "False",
+    auto_mode: bool = False,
     desired_door_state: str = "stopped",
     reference_door_endstops_ms=REF_MS,
     toggle_reference: bool = False,
@@ -243,11 +243,11 @@ class TestReferenceSequence:
         """Reference aborts with error when lower endstop is never reached."""
         import door as door_mod
         saved = door_mod.referenceSequenceTimeout
-        door_mod.referenceSequenceTimeout = 0.3   # force a quick timeout
 
         try:
             _init_gv(toggle_reference=True, reference_door_endstops_ms=None)
             door = DOOR()
+            door_mod.referenceSequenceTimeout = 0.3   # force a quick timeout
             runner = _make_runner(door)
             returned = runner.step()   # blocks ~0.3 s then returns
         finally:
@@ -262,11 +262,11 @@ class TestReferenceSequence:
         """Reference aborts with error when upper endstop is never reached."""
         import door as door_mod
         saved = door_mod.referenceSequenceTimeout
-        door_mod.referenceSequenceTimeout = 0.5
 
         try:
             _init_gv(toggle_reference=True, reference_door_endstops_ms=None)
             door = DOOR()
+            door_mod.referenceSequenceTimeout = 0.5   # force a quick timeout
             runner = _make_runner(door)
 
             result: dict = {}
@@ -300,7 +300,7 @@ class TestPrematureEndstop:
     def _setup(self) -> tuple[DOOR, DoorTaskRunner, list]:
         """Create door + runner configured for auto-close premature tests."""
         _init_gv(
-            auto_mode="True",
+            auto_mode=True,
             desired_door_state="closed",
             reference_door_endstops_ms=REF_MS,
         )
@@ -433,7 +433,7 @@ class TestPrematureEndstop:
     def test_no_premature_detection_in_manual_mode(self):
         """With auto_mode=False premature detection must not fire."""
         _init_gv(
-            auto_mode="False",
+            auto_mode=False,
             desired_door_state="closed",
             reference_door_endstops_ms=REF_MS,
         )
@@ -687,7 +687,7 @@ class TestPrematureEndstop:
         3. The door does NOT start closing again before the retry fires.
         """
         _init_gv(
-            auto_mode="True",
+            auto_mode=True,
             desired_door_state="closed",
             reference_door_endstops_ms=REF_MS,
         )
@@ -752,7 +752,7 @@ class TestPrematureEndstop:
         assert runner.auto_close_premature_count == 1
 
         # Operator disables auto mode from the web UI
-        global_vars.instance().set_value("auto_mode", "False")
+        global_vars.instance().set_value("auto_mode", False)
         runner.step()
 
         assert runner.auto_close_premature_count == 0
@@ -768,7 +768,7 @@ class TestErrorStateManagement:
 
     def test_clear_error_flag_resets_door_and_retry_state(self):
         """Setting clear_error_state=True clears door error and retry counters."""
-        _init_gv(auto_mode="False", desired_door_state="stopped")
+        _init_gv(auto_mode=False, desired_door_state="stopped")
         door = DOOR()
         runner = _make_runner(door)
 
@@ -796,7 +796,7 @@ class TestErrorStateManagement:
 
     def test_error_state_drive_sends_notification_exactly_once(self):
         """Error during motor drive emits one push notification even over N steps."""
-        _init_gv(auto_mode="False", desired_door_state="open")
+        _init_gv(auto_mode=False, desired_door_state="open")
         door = DOOR()
         notifications: list = []
         runner = _make_runner(door, notifications=notifications)
@@ -818,7 +818,7 @@ class TestBasicDoorMovement:
 
     def test_desired_open_starts_opening(self):
         """desired_door_state='open' → step calls door.open() → state 'opening'."""
-        _init_gv(auto_mode="False", desired_door_state="open")
+        _init_gv(auto_mode=False, desired_door_state="open")
         door = DOOR()
         runner = _make_runner(door)
 
@@ -827,7 +827,7 @@ class TestBasicDoorMovement:
 
     def test_upper_endstop_transitions_to_open(self):
         """Door transitions opening → open when upper endstop fires."""
-        _init_gv(auto_mode="False", desired_door_state="open")
+        _init_gv(auto_mode=False, desired_door_state="open")
         door = DOOR()
         runner = _make_runner(door)
 
@@ -842,7 +842,7 @@ class TestBasicDoorMovement:
 
     def test_desired_closed_starts_closing(self):
         """desired_door_state='closed' → step calls door.close() → state 'closing'."""
-        _init_gv(auto_mode="False", desired_door_state="closed")
+        _init_gv(auto_mode=False, desired_door_state="closed")
         door = DOOR()
         runner = _make_runner(door)
 
@@ -851,7 +851,7 @@ class TestBasicDoorMovement:
 
     def test_lower_endstop_transitions_to_closed(self):
         """Door transitions closing → closed when lower endstop fires."""
-        _init_gv(auto_mode="False", desired_door_state="closed")
+        _init_gv(auto_mode=False, desired_door_state="closed")
         door = DOOR()
         runner = _make_runner(door)
 
@@ -877,7 +877,7 @@ class TestBasicDoorMovement:
         (count sequence: 0 → 0.5 → 1.0 → 1.5 → 2.0 > 1.5 → error).
         """
         _init_gv(
-            auto_mode="False",
+            auto_mode=False,
             desired_door_state="open",
             reference_door_endstops_ms=500,
         )

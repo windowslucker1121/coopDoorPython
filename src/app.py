@@ -137,7 +137,7 @@ def load_config():
     saveNewConfig = False
     with config_lock:
         config_to_set = {
-            "auto_mode": "True",
+            "auto_mode": True,
             "sunrise_offset": 0,
             "sunset_offset": 0,
             "location": {
@@ -230,7 +230,7 @@ def get_all_data():
     time_until_open_str = None
     time_until_close_str = None
 
-    if auto_mode == "False":
+    if not auto_mode:
         time_until_open_str = "disabled"
         time_until_close_str = "disabled"
     elif sunrise is not None and sunset is not None:
@@ -287,7 +287,7 @@ def get_all_data():
       'tu_open': time_until_open_str if time_until_open_str is not None else "",
       'tu_close': time_until_close_str if time_until_close_str is not None else "",
       'reference_door_endstops_ms': str(reference_door_endstops_ms) if reference_door_endstops_ms is not None else "Not set",
-      'auto_mode': auto_mode,
+      'auto_mode': "True" if auto_mode else "False",
       'errorstate' : error_state,
       'camera_enabled' : str(camera_enabled),
       # System metrics
@@ -493,20 +493,20 @@ def handle_disconnect():
 @socketio.on('open')
 def handle_open():
     logger.debug('Open button pressed which disables auto mode')
-    global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("auto_mode", False)
     global_vars.instance().set_value("desired_door_state", "open")
 
 @socketio.on('close')
 def handle_close():
     logger.debug('Close button pressed which disables auto mode')
-    
-    global_vars.instance().set_value("auto_mode", "False")
+
+    global_vars.instance().set_value("auto_mode", False)
     global_vars.instance().set_value("desired_door_state", "closed")
 
 @socketio.on('stop')
 def handle_stop():
     logger.debug('Stop button pressed which disables auto mode')
-    global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("auto_mode", False)
     global_vars.instance().set_value("desired_door_state", "stopped")
 
 @socketio.on('toggle')
@@ -516,10 +516,10 @@ def handle_toggle(message):
     logger.debug(f'Toggle button pressed: {toggle_value}')
     if toggle_value:
         logger.info('Auto Mode Enabled')
-        global_vars.instance().set_value("auto_mode", "True")
+        global_vars.instance().set_value("auto_mode", True)
     else:
         logger.info('Auto Mode Disabled')
-        global_vars.instance().set_value("auto_mode", "False")
+        global_vars.instance().set_value("auto_mode", False)
 
     logger.debug(f"current auto mode: {global_vars.instance().get_value('auto_mode')}")
     save_config()
@@ -1291,7 +1291,7 @@ if __name__ == '__main__':
     temp_thread.start()
 
     # Start the task that logs data to CSV files:
-    if (global_vars.instance().get_value("csvLog") == True):
+    if global_vars.instance().get_value("csvLog"):
         log_thread = Thread(target=data_log_task)
         log_thread.daemon = True
         log_thread.start()
