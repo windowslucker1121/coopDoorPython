@@ -1377,6 +1377,9 @@
                     <option value="">— select a log file —</option>
                 </select>
                 <input class="logviewer-search" id="lv-search" type="text" placeholder="🔍 Search…" oninput="lvRender()">
+                <select class="logviewer-file-select" id="lv-logger-select" style="min-width:140px;max-width:200px;" onchange="lvToggleLogger()">
+                    <option value="ALL">All loggers</option>
+                </select>
                 <div class="lv-level-filters" id="lv-level-filters">
                     <button class="lv-level-btn lv-chip-ALL active"      data-level="ALL"      onclick="lvToggleLevel(this)">ALL</button>
                     <button class="lv-level-btn lv-chip-DEBUG"           data-level="DEBUG"    onclick="lvToggleLevel(this)">DEBUG</button>
@@ -2628,6 +2631,7 @@
         /* ── Log Viewer ─────────────────────────────────────── */
         let _lv_allLines    = [];
         let _lv_activeLevel = 'ALL';
+        let _lv_activeLogger = 'ALL';
         let _lv_sortDesc    = true;
         let _lv_autoInter   = null;
         let _lv_curFile     = '';
@@ -2681,11 +2685,36 @@
                 _lv_allLines = data;
                 document.getElementById('lv-stat-file').textContent  = filename;
                 document.getElementById('lv-stat-count').textContent = data.length + ' lines total';
+
+                // Populate logger dropdown from loaded lines
+                const logSel   = document.getElementById('lv-logger-select');
+                const prevLg   = logSel.value;
+                const loggers  = ['ALL', ...[...new Set(data.map(ln => ln.lg).filter(Boolean))].sort()];
+                logSel.innerHTML = '';
+                loggers.forEach(lg => {
+                    const opt = document.createElement('option');
+                    opt.value = lg;
+                    opt.textContent = lg === 'ALL' ? 'All loggers' : lg;
+                    logSel.appendChild(opt);
+                });
+                if (loggers.includes(prevLg)) {
+                    logSel.value = prevLg;
+                    _lv_activeLogger = prevLg;
+                } else {
+                    logSel.value = 'ALL';
+                    _lv_activeLogger = 'ALL';
+                }
+
                 lvRender();
             } catch(err) {
                 document.getElementById('lv-body').innerHTML =
                     '<div class="lv-empty">⚠️ Error: ' + lvEsc(err.message) + '</div>';
             }
+        }
+
+        function lvToggleLogger() {
+            _lv_activeLogger = document.getElementById('lv-logger-select').value;
+            lvRender();
         }
 
         function lvToggleLevel(btn) {
@@ -2743,6 +2772,7 @@
                     const lvs = Array.isArray(_lv_activeLevel) ? _lv_activeLevel : [_lv_activeLevel];
                     if (!lvs.includes(ln.lv)) return false;
                 }
+                if (_lv_activeLogger !== 'ALL' && ln.lg !== _lv_activeLogger) return false;
                 if (needle) {
                     if (!(ln.t + ln.lg + ln.lv + ln.m).toLowerCase().includes(needle)) return false;
                 }
