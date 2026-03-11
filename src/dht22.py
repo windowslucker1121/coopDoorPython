@@ -12,12 +12,23 @@ class DHT22(TemperatureSensor):
     # Pass power_pin=None to skip power cycling (e.g. when the GPIO pin is
     # used for a different device).
     def __init__(self, data_pin, power_pin=None):
+        self._data_pin = data_pin
         self.pwr = int(power_pin) if power_pin is not None else None
         if self.pwr is not None:
             GPIO.setmode(GPIO.BCM)
             GPIO.setup(self.pwr, GPIO.OUT)
             GPIO.output(self.pwr, GPIO.LOW)
         self.dht = adafruit_dht.DHT22(data_pin)
+
+    def _reinit(self):
+        """Exit and recreate the underlying adafruit_dht object to recover from
+        a stuck PulseIn state (OSError [Errno 22])."""
+        try:
+            self.dht.exit()
+        except Exception:
+            pass
+        time.sleep(2.2)
+        self.dht = adafruit_dht.DHT22(self._data_pin)
 
     def get_temperature_and_humidity(self):
         temp_f = None
@@ -37,6 +48,11 @@ class DHT22(TemperatureSensor):
                 break
             except (RuntimeError, OverflowError):
                 time.sleep(2.2)
+                continue
+            except OSError:
+                # PulseIn entered a bad state — reinitialise to recover.
+                logger.warning("DHT22: OSError on read, reinitialising sensor")
+                self._reinit()
                 continue
 
         if self.pwr is not None:
