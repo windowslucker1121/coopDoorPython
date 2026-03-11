@@ -328,6 +328,11 @@ def temperature_task():
         dht_out = DHT22(data_pin_out, power_pin=dht22_power_num)
     last_date = None
 
+    # Tracks how many consecutive times each sensor reading was rejected by the spike
+    # filter. After 3 consecutive rejections, the new value is accepted — this lets
+    # legitimate slow drifts catch up when the sensor was absent for a while.
+    _spike_reject_counts = {}
+
     # Update value in global vars, and also store min and max seen since startup:
     def update_val(val, name):
         if val is not None:
@@ -335,10 +340,25 @@ def temperature_task():
             val_old, val_max, val_min = \
                 global_vars.instance().get_values([name, name + "_max", name + "_min"])
 
-            # Throw away any errant readings. Sometimes the readings are nonsensical
+            # Throw away one-off errant readings (DHT sensors occasionally return
+            # wildly wrong values for a single sample).  However, if the same
+            # out-of-range value appears 3+ times in a row we accept it — the
+            # temperature has legitimately changed more than 5° (e.g. after the
+            # sensor was offline for a while during a cold night).
             if val_old is not None:
                 if val > (val_old + 5.0) or val < (val_old - 5.0):
-                    val = val_old
+                    _spike_reject_counts[name] = _spike_reject_counts.get(name, 0) + 1
+                    if _spike_reject_counts[name] < 3:
+                        val = val_old
+                    else:
+                        logger.warning(
+                            "temperature_task: accepting large %s change after "
+                            "%d consecutive rejections (%.1f -> %.1f)",
+                            name, _spike_reject_counts[name], val_old, val
+                        )
+                        _spike_reject_counts[name] = 0
+                else:
+                    _spike_reject_counts[name] = 0
 
             # Update min and max
             val_max = val_max if val_max is not None else -500
@@ -352,35 +372,34 @@ def temperature_task():
             global_vars.instance().set_values({name: val, name + "_max": val_max, name + "_min": val_min})
 
     while True:
-        temp_out, hum_out = dht_out.get_temperature_and_humidity()
-        temp_in, hum_in = dht_in.get_temperature_and_humidity()  # DHT11 inside
+        try:
+            temp_out, hum_out = dht_out.get_temperature_and_humidity()
+            temp_in, hum_in = dht_in.get_temperature_and_humidity()  # DHT11 inside
 
-        #if temp_out is not None and hum_out is not None:
-        #    logger.debug("Outside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_out, hum_out))
-        #if temp_in is not None and hum_in is not None:
-        #    logger.debug("Inside Temperature={0:0.1f}F Humidity={1:0.1f}%".format(temp_in, hum_in))
+            # If it is midnight then reset the mins and maxes so we get fresh values for the new day:
+            current_date = date.today()
+            if current_date != last_date:
+                global_vars.instance().set_values({ \
+                    "temp_in_min": 500, "temp_in_max": -500, \
+                    "temp_out_min": 500, "temp_out_max": -500, \
+                    "hum_in_min": 500, "hum_in_max": -500, \
+                    "hum_out_min": 500, "hum_out_max": -500, \
+                    "cpu_temp_min": 500, "cpu_temp_max": -500 \
+                })
+                last_date = current_date
 
-        # If it is midnight then reset the mins and maxes so we get fresh values for the new day:
-        current_date = date.today()
-        if current_date != last_date:
-            global_vars.instance().set_values({ \
-                "temp_in_min": 500, "temp_in_max": -500, \
-                "temp_out_min": 500, "temp_out_max": -500, \
-                "hum_in_min": 500, "hum_in_max": -500, \
-                "hum_out_min": 500, "hum_out_max": -500, \
-                "cpu_temp_min": 500, "cpu_temp_max": -500 \
-            })
-            last_date = current_date
+            # Update the global variables for all the temperatures:
+            update_val(temp_in, "temp_in")
+            update_val(hum_in, "hum_in")
+            update_val(temp_out, "temp_out")
+            update_val(hum_out, "hum_out")
 
-        # Update the global variables for all the temperatures:
-        update_val(temp_in, "temp_in")
-        update_val(hum_in, "hum_in")
-        update_val(temp_out, "temp_out")
-        update_val(hum_out, "hum_out")
+            # Set CPU temperature:
+            cpu_temp = CPUTemperature().temperature
+            update_val(cpu_temp, "cpu_temp")
 
-        # Set CPU temperature:
-        cpu_temp = CPUTemperature().temperature
-        update_val(cpu_temp, "cpu_temp")
+        except Exception as e:
+            logger.error("temperature_task: unhandled exception — %s", e, exc_info=True)
 
         time.sleep(2.5)
 

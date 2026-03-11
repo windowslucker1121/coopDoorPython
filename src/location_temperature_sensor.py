@@ -77,7 +77,9 @@ class LocationAPITemperatureSensor(TemperatureSensor):
 
         except requests.exceptions.RequestException as e:
             logger.warning("LocationAPITemperatureSensor: HTTP error — %s", e)
+            self._last_fetch_time = now
         except (KeyError, ValueError, TypeError) as e:
             logger.warning("LocationAPITemperatureSensor: unexpected response — %s", e)
+            self._last_fetch_time = now
 
         return self._cached_result
