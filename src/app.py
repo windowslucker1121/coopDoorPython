@@ -722,7 +722,12 @@ def handle_get_debug_data():
                 "mode": pin_info.get("mode", "N/A")
             })
     else:
-        import RPi.GPIO as RealGPIO
+        try:
+            import RPi.GPIO as RealGPIO
+        except Exception as e:
+            logger.error(f"Failed to load RPi.GPIO ({e}). Falling back to MockGPIO.")
+            from mock_gpio import MockGPIO as RealGPIO
+            
         for pin_num, meta in sorted(pin_meta.items()):
             try:
                 state = "HIGH" if RealGPIO.input(pin_num) else "LOW"

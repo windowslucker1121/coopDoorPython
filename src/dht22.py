@@ -1,5 +1,10 @@
 import adafruit_dht
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).error(f"Failed to initialize RPi.GPIO ({e}). Falling back to MockGPIO.")
+    from mock_gpio import MockGPIO as GPIO
 import board
 import time
 import logging

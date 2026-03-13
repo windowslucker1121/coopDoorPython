@@ -8,7 +8,11 @@ logger = logging.getLogger(__name__)
 if os.name == "nt":
     from mock_gpio import MockGPIO as GPIO
 else:
-    import RPi.GPIO as GPIO
+    try:
+        import RPi.GPIO as GPIO
+    except Exception as e:
+        logger.error(f"Failed to initialize RPi.GPIO ({e}). Falling back to MockGPIO.")
+        from mock_gpio import MockGPIO as GPIO
 
 GPIO.setwarnings(False)
 import time
