@@ -19,6 +19,7 @@
             --high:           #2ecc71;
             --low:            #e74c3c;
             --neutral:        #95a5a6;
+            --success:        #27ae60; /* FIX 3: added missing --success variable */
         }
 
         html.dark {
@@ -29,6 +30,7 @@
             --text-muted:     #999;
             --border:         #3d3d5c;
             --shadow:         rgba(0,0,0,0.3);
+            --success:        #2ecc71; /* FIX 3: dark-mode variant */
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -181,8 +183,9 @@
         .gpio-actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
         .btn { padding: 7px 18px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 0.82rem; transition: opacity 0.2s; }
         .btn:hover { opacity: 0.8; }
-        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary   { background: var(--accent); color: #fff; }
         .btn-secondary { background: var(--surface-alt); color: var(--text); border: 1px solid var(--border); }
+        .btn-danger    { background: var(--low); color: #fff; } /* FIX 2: added missing .btn-danger style */
         .gpio-status { grid-column: 1 / -1; font-size: 0.78rem; padding: 6px 10px; border-radius: 6px; display: none; }
         .gpio-status.success { background: #d4edda; color: #155724; display: block; }
         .gpio-status.error   { background: #f8d7da; color: #721c24; display: block; }
@@ -323,11 +326,9 @@
     <div class="card">
         <h2 onclick="toggleSection('wifiConfigSection', this)">📶 Wi-Fi Configuration <span class="chevron">▼</span></h2>
         <div id="wifiConfigSection" class="section-body">
-            
             <div id="ethernetStatusMessage" style="display: none; color: var(--success); font-weight: bold; margin-bottom: 12px; padding: 10px; background: var(--surface-alt); border-radius: 6px;">
                 🔌 Ethernet is connected. Wi-Fi configuration is disabled.
             </div>
-
             <div id="wifiConfigurationWrapper">
                 <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
                     Configure the primary Wi-Fi connection and the fallback Access Point (AP) mode settings.
@@ -350,9 +351,9 @@
                         <label>Connection Timeout (s)</label>
                         <input type="number" min="10" max="600" id="wf_timeout" name="timeout" autocomplete="off" data-lpignore="true">
                     </div>
-                    
+
                     <h3 style="grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; font-size: 1rem; color: var(--text);">Fallback AP Mode</h3>
-                    
+
                     <div class="gpio-field">
                         <label>AP SSID</label>
                         <input type="text" id="wf_ap_ssid" name="ap_ssid" autocomplete="off" data-lpignore="true">
@@ -361,7 +362,7 @@
                         <label>AP Password</label>
                         <input type="text" id="wf_ap_password" name="ap_password" autocomplete="new-password" data-lpignore="true">
                     </div>
-                    
+
                     <div id="wifiStatus" class="gpio-status" style="grid-column: 1 / -1;"></div>
                     <div class="gpio-actions" style="grid-column: 1 / -1;">
                         <button type="button" class="btn btn-primary" onclick="saveWifiConfig()">💾 Save to config.yaml</button>
@@ -373,7 +374,6 @@
             </div>
         </div>
     </div>
-
 
     <!-- ── Global Variables ───────────────────────── -->
     <div class="card">
@@ -420,13 +420,8 @@
     </div>
 
     <script>
-        let socket = null;
-        try {
-            socket = io();
-            socket.on('debug_data', function(data) { /* ... */ });
-        } catch (e) {
-            console.warn('Socket.IO unavailable, live updates disabled.', e);
-        }
+        const socket = io();
+
         // ── Section collapse ────────────────────────
         function toggleSection(sectionId, headerEl) {
             const section = document.getElementById(sectionId);
@@ -593,7 +588,7 @@
             }
         }
 
-        // --- Wi-Fi Form Logic ---
+        // ── Wi-Fi Form Logic ────────────────────────
         function showWifiStatus(msg, type, autoDismissMs) {
             const el = document.getElementById('wifiStatus');
             el.textContent = msg;
@@ -621,7 +616,7 @@
             const payload = {
                 ssid: document.getElementById('wf_ssid').value,
                 password: document.getElementById('wf_password').value,
-                timeout: document.getElementById('wf_timeout').value,
+                timeout: parseInt(document.getElementById('wf_timeout').value, 10), /* FIX 4: parse as integer */
                 ap_ssid: document.getElementById('wf_ap_ssid').value,
                 ap_password: document.getElementById('wf_ap_password').value
             };
@@ -670,7 +665,7 @@
         function testWifiConnection() {
             const ssid = document.getElementById('wf_ssid').value;
             const password = document.getElementById('wf_password').value;
-            if(!ssid) {
+            if (!ssid) {
                 showWifiStatus('SSID is missing', 'error', 3000);
                 return;
             }
@@ -678,7 +673,7 @@
             fetch('/api/wifi-connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ssid, password})
+                body: JSON.stringify({ ssid, password })
             })
             .then(async r => {
                 let res;
@@ -728,3 +723,6 @@
         loadGpioConfig();
         loadWifiConfig();
         loadNetworkStatus();
+    </script>
+</body>
+</html>
