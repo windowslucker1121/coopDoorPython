@@ -1537,7 +1537,7 @@ if __name__ == '__main__':
     try:
         import subprocess
         commit_hash = subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
+            ['git', '-c', 'safe.directory=*', 'rev-parse', '--short', 'HEAD'],
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             stderr=subprocess.DEVNULL
         ).decode().strip()
