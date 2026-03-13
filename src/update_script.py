@@ -39,10 +39,10 @@ def main():
             subprocess.run(["find", ".git/objects/", "-type", "f", "-size", "0", "-delete"], check=False)
         
         # If the repository is in a detached or messed up state, this might be needed
-        subprocess.run(["git", "fetch", "--all"], check=False)
-        subprocess.run(["git", "reset", "--hard", "@{u}"], check=False)
+        subprocess.run(["git", "-c", "safe.directory=*", "fetch", "--all"], check=False)
+        subprocess.run(["git", "-c", "safe.directory=*", "reset", "--hard", "@{u}"], check=False)
         
-        subprocess.run(["git", "pull"], check=True)
+        subprocess.run(["git", "-c", "safe.directory=*", "pull"], check=True)
         print("Git update successful.")
     except subprocess.CalledProcessError as e:
         print(f"Git update failed: {e}")
