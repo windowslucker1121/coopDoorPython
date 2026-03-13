@@ -332,7 +332,7 @@
                 <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
                     Configure the primary Wi-Fi connection and the fallback Access Point (AP) mode settings.
                 </p>
-                <form class="gpio-form" id="wifiForm" onsubmit="return false;">
+                <form class="gpio-form" id="wifiForm" onsubmit="return false;" autocomplete="off">
                     <div class="gpio-field full-width">
                         <label>Scan Wi-Fi Networks</label>
                         <button type="button" class="btn btn-secondary" onclick="scanWifi()" id="btnScanWifi" style="margin-bottom: 8px;">🔍 Scan Wi-Fi</button>
@@ -340,26 +340,26 @@
                     </div>
                     <div class="gpio-field">
                         <label>Target SSID</label>
-                        <input type="text" id="wf_ssid" name="ssid" placeholder="MyWiFiNetwork">
+                        <input type="text" id="wf_ssid" name="ssid" placeholder="MyWiFiNetwork" autocomplete="off" data-lpignore="true">
                     </div>
                     <div class="gpio-field">
                         <label>Wi-Fi Password</label>
-                        <input type="password" id="wf_password" name="password" placeholder="Leave empty if open">
+                        <input type="password" id="wf_password" name="password" placeholder="Leave empty if open" autocomplete="new-password" data-lpignore="true">
                     </div>
                     <div class="gpio-field">
                         <label>Connection Timeout (s)</label>
-                        <input type="number" min="10" max="600" id="wf_timeout" name="timeout">
+                        <input type="number" min="10" max="600" id="wf_timeout" name="timeout" autocomplete="off" data-lpignore="true">
                     </div>
                     
                     <h3 style="grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; font-size: 1rem; color: var(--text);">Fallback AP Mode</h3>
                     
                     <div class="gpio-field">
                         <label>AP SSID</label>
-                        <input type="text" id="wf_ap_ssid" name="ap_ssid">
+                        <input type="text" id="wf_ap_ssid" name="ap_ssid" autocomplete="off" data-lpignore="true">
                     </div>
                     <div class="gpio-field">
                         <label>AP Password</label>
-                        <input type="text" id="wf_ap_password" name="ap_password">
+                        <input type="text" id="wf_ap_password" name="ap_password" autocomplete="new-password" data-lpignore="true">
                     </div>
                     
                     <div id="wifiStatus" class="gpio-status" style="grid-column: 1 / -1;"></div>
@@ -676,7 +676,8 @@
                 body: JSON.stringify({ssid, password})
             })
             .then(async r => {
-                const res = await r.json();
+                let res;
+                try { res = await r.json(); } catch(err) { res = { success: false }; }
                 if (r.ok && res.success) {
                     showWifiStatus('Successfully connected to ' + ssid, 'success');
                 } else {
@@ -690,7 +691,8 @@
             showWifiStatus('Switching to AP mode... please wait', 'success');
             fetch('/api/wifi-ap', { method: 'POST' })
             .then(async r => {
-                const res = await r.json();
+                let res;
+                try { res = await r.json(); } catch(err) { res = { success: false }; }
                 if (r.ok && res.success) {
                     showWifiStatus('Successfully switched to AP mode.', 'success');
                 } else {
