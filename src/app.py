@@ -1343,16 +1343,22 @@ def configure_logging():
     # app.log.YYYY-MM-DD, keeping 30 days of history automatically.
     log_filename = os.path.join(log_dir, "app.log")
 
-    rotating_file_handler = TimedRotatingFileHandler(
-        log_filename,
-        when='midnight',    # rotate at midnight each day
-        interval=1,
-        backupCount=30,     # keep 30 days of history
-        encoding='utf-8'
-    )
-    rotating_file_handler.setFormatter(formatter)
-    if not any(isinstance(h, (RotatingFileHandler, TimedRotatingFileHandler)) for h in rootLogger.handlers):
-        rootLogger.addHandler(rotating_file_handler)
+    try:
+        rotating_file_handler = TimedRotatingFileHandler(
+            log_filename,
+            when='midnight',    # rotate at midnight each day
+            interval=1,
+            backupCount=30,     # keep 30 days of history
+            encoding='utf-8'
+        )
+        rotating_file_handler.setFormatter(formatter)
+        if not any(isinstance(h, (RotatingFileHandler, TimedRotatingFileHandler)) for h in rootLogger.handlers):
+            rootLogger.addHandler(rotating_file_handler)
+    except PermissionError as e:
+        print(f"Warning: Could not configure file logging due to permission error: {e}. Running without file logs.")
+        print("To fix this, you might need to fix the ownership of the log directory: sudo chown -R $USER:$USER /home/pi/coopDoorPython/log")
+    except Exception as e:
+        print(f"Warning: Could not configure file logging: {e}")
 
     # Set the log level for the geventwebsocket handler because it is too verbose
     gws_logger = logging.getLogger("geventwebsocket.handler")
