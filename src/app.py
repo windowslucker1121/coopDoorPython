@@ -28,6 +28,15 @@ from camera import Camera
 import base64
 from pywebpush import webpush, WebPushException
 import atexit
+import subprocess
+
+if os.name != 'nt':
+    try:
+        subprocess.run(["killall", "-9", "libgpiod_pulsein"], stderr=subprocess.DEVNULL)
+        subprocess.run(["killall", "-9", "libgpiod_pulsein64"], stderr=subprocess.DEVNULL)
+        subprocess.run(["killall", "-9", "libgpiod_pulsei"], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -506,7 +515,6 @@ def wifi_watchdog_task():
     ap_ssid = wifi_config.get("ap_ssid", "DINKY-COOP")
     ap_password = wifi_config.get("ap_password", "password")
 
-    logger.info(f"WiFi watchdog configuration: target_ssid='{target_ssid}', timeout={timeout_sec}s, ap_ssid='{ap_ssid}'")
     current_conn = wifi_mgr.get_current_connection()
     if wifi_mgr.is_ap_mode_active():
         logger.info("Device is already in AP mode. Watchdog will not interfere.")
