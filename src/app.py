@@ -1,3 +1,15 @@
+import os
+import glob
+try:
+    for p in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.lgd-nfy*')):
+        try: os.remove(p)
+        except Exception: pass
+    for p in glob.glob('.lgd-nfy*'):
+        try: os.remove(p)
+        except Exception: pass
+except Exception:
+    pass
+
 #this needs to be at the top of the gevent because the threads somehow interfere - i dont know why but this is the solution for now
 from door import DOOR
 from door_task_runner import DoorTaskRunner
@@ -12,7 +24,6 @@ from protected_dict import protected_dict as global_vars
 from astral import LocationInfo
 from astral.geocoder import database, LocationDatabase
 from astral.sun import sun
-from gpiozero import CPUTemperature
 import time
 import psutil
 import json
@@ -41,10 +52,18 @@ if os.name != 'nt':
 logger = logging.getLogger(__name__)
 
 if os.name != 'nt':
-    from gpiozero import CPUTemperature
-    import board
-    from dht22 import DHT22
-    from dht11 import DHT11
+    try:
+        from gpiozero import CPUTemperature
+        import board
+        from dht22 import DHT22
+        from dht11 import DHT11
+    except Exception as e:
+        logger.error(f"Hardware initialization failed: {e}. Falling back to mock hardware.")
+        from MockDHT22 import MockDHT22 as DHT22
+        from MockDHT11 import MockDHT11 as DHT11
+        from mock_board import MockBoard
+        from mock_temperatur import MockCPUTemperature as CPUTemperature
+        board = MockBoard()
 else:
     logger.warning("Running on Windows, using mock classes.")
     from MockDHT22 import MockDHT22
