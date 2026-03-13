@@ -930,14 +930,10 @@ def subscribe():
 @app.route('/version')
 def get_version():
     import subprocess
-    try:
-        commit_hash = subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
-    except Exception:
-        commit_hash = 'unknown'
+    commit_hash = "unknown"
+    if os.path.exists('version.txt'):
+        with open('version.txt', 'r') as f:
+            commit_hash = f.read().strip()
     return jsonify({'version': commit_hash})
 
 # ── Log Viewer API ────────────────────────────────────────────────────────────
@@ -1481,6 +1477,7 @@ def load_notification_keys():
 
 if __name__ == '__main__':
     
+
     # Initialize the desired door state:
     global_vars.instance().set_value("desired_door_state", "stopped")
     
@@ -1536,6 +1533,24 @@ if __name__ == '__main__':
 
     # Print the IP address and port to the console
     logger.info(f"Starting Flask app on {host}:{port}")
+    logger.info(f"Retrieving git commit hash for version endpoint...")
+    try:
+        import subprocess
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+        logger.info(f"Git commit hash: {commit_hash}")
+        if os.path.exists(os.path.join(root_path, "version.txt")):
+            logger.info("Removing old version.txt file")
+            os.remove(os.path.join(root_path, "version.txt"))
+        with open(os.path.join(root_path, "version.txt"), 'w') as f:
+            f.write(commit_hash)
+
+        logger.info("Version endpoint is ready to serve the current git commit hash.")
+    except Exception as e:
+        logger.error(f"Failed to retrieve git commit hash: {e}")
 
     # Start the Flask app
     socketio.run(app, debug=False, host=host, port=port)
