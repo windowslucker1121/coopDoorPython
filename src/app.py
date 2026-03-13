@@ -115,6 +115,14 @@ GPIO_DEFAULTS = {
     "reference_timeout": 60,
 }
 
+WIFI_DEFAULTS = {
+    "ssid": "",
+    "password": "",
+    "timeout": 60,
+    "ap_ssid": "DINKY-COOP",
+    "ap_password": "password",
+}
+
 def save_config():
     with config_lock:
         with open(config_filename, 'w') as file:
@@ -130,6 +138,7 @@ def save_config():
                 "camera_index" : global_vars.instance().get_value("camera_index"),
                 "outdoor_sensor_type": global_vars.instance().get_value("outdoor_sensor_type"),
                 "gpio": global_vars.instance().get_value("gpio"),
+                "wifi": global_vars.instance().get_value("wifi"),
             }
             yaml.dump(to_dump, file)
 
@@ -155,6 +164,7 @@ def load_config():
             # Outdoor sensor backend: "dht22" (physical sensor) or "api" (Open-Meteo)
             "outdoor_sensor_type": "dht22",
             "gpio": dict(GPIO_DEFAULTS),
+            "wifi": dict(WIFI_DEFAULTS),
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
@@ -166,6 +176,10 @@ def load_config():
                     merged_gpio = dict(GPIO_DEFAULTS)
                     merged_gpio.update(yaml_config["gpio"])
                     yaml_config["gpio"] = merged_gpio
+                if "wifi" in yaml_config and isinstance(yaml_config["wifi"], dict):
+                    merged_wifi = dict(WIFI_DEFAULTS)
+                    merged_wifi.update(yaml_config["wifi"])
+                    yaml_config["wifi"] = merged_wifi
                 config_to_set.update(yaml_config)
         else:
             saveNewConfig = True
@@ -473,6 +487,47 @@ def data_log_task():
         # Sleep a bit:
         last_log_file_name = log_file_name
         time.sleep(5.0)
+
+def wifi_watchdog_task():
+    logger.info("WiFi watchdog thread started")
+    # Wait for the system's own auto-connect mechanism to attempt a connection
+    time.sleep(15)
+
+    wifi_config = global_vars.instance().get_value("wifi") or WIFI_DEFAULTS
+    target_ssid = wifi_config.get("ssid")
+    target_pass = wifi_config.get("password")
+    
+    timeout_str = wifi_config.get("timeout", 60)
+    try:
+        timeout_sec = int(timeout_str)
+    except (ValueError, TypeError):
+        timeout_sec = 60
+        
+    ap_ssid = wifi_config.get("ap_ssid", "DINKY-COOP")
+    ap_password = wifi_config.get("ap_password", "password")
+
+    current_conn = wifi_mgr.get_current_connection()
+    if wifi_mgr.is_ap_mode_active():
+        logger.info("Device is already in AP mode. Watchdog will not interfere.")
+        return
+
+    if current_conn:
+        logger.info(f"System is already connected to an active network: {current_conn.get('ssid')}. Watchdog exiting.")
+        return
+
+    logger.warning("No active WiFi connection detected after boot.")
+    if target_ssid:
+        logger.info(f"Attempting strictly to connect to configured SSID: {target_ssid} (timeout {timeout_sec}s)")
+        success = wifi_mgr.connect(target_ssid, target_pass, timeout=timeout_sec)
+        if not success:
+            logger.error(f"Failed to connect to {target_ssid}. Falling back to AP mode.")
+            wifi_mgr.start_ap(ap_ssid, ap_password)
+        else:
+            logger.info(f"Successfully connected to {target_ssid}.")
+    else:
+        logger.info("No target SSID configured in settings. Falling back to AP mode immediately.")
+        wifi_mgr.start_ap(ap_ssid, ap_password)
+
 
 def camera_task():
     if (global_vars.instance().get_value("enable_camera") == False):
@@ -1081,6 +1136,61 @@ def api_set_gpio_config():
     })
 
 
+from wifi_manager import WifiManager
+wifi_mgr = WifiManager()
+
+@app.route('/api/wifi-scan', methods=['GET'])
+def api_wifi_scan():
+    """Scan and return available WiFi networks."""
+    networks = wifi_mgr.scan_networks()
+    return jsonify(networks)
+
+@app.route('/api/wifi-config', methods=['GET'])
+def api_get_wifi_config():
+    """Return the current WiFi configuration."""
+    wifi_config = global_vars.instance().get_value("wifi") or dict(WIFI_DEFAULTS)
+    # Hide password in the wild if we want, or send it clear so form can show it. We'll leave as is for debug page.
+    return jsonify(wifi_config)
+
+@app.route('/api/wifi-config', methods=['POST'])
+def api_set_wifi_config():
+    """Persist updated WiFi configuration to config.yaml."""
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': 'JSON body required'}), 400
+
+    existing = dict(global_vars.instance().get_value("wifi") or WIFI_DEFAULTS)
+    
+    if "ssid" in data: existing["ssid"] = str(data["ssid"])
+    if "password" in data: existing["password"] = str(data["password"])
+    if "ap_ssid" in data: existing["ap_ssid"] = str(data["ap_ssid"])
+    if "ap_password" in data: existing["ap_password"] = str(data["ap_password"])
+    try:
+        if "timeout" in data: existing["timeout"] = int(data["timeout"])
+    except ValueError:
+        return jsonify({'error': 'Timeout must be an integer'}), 400
+
+    global_vars.instance().set_value("wifi", existing)
+    save_config()
+
+    return jsonify({
+        'message': 'WiFi config saved. Will attempt connection on next periodic check or reboot.',
+        'wifi': existing,
+    })
+
+@app.route('/api/wifi-connect', methods=['POST'])
+def api_wifi_connect():
+    """Immediately try connecting to the selected WiFi (does not save to config)."""
+    data = request.get_json(silent=True)
+    ssid = data.get("ssid")
+    password = data.get("password")
+    if not ssid:
+        return jsonify({'error': 'SSID is required'}), 400
+    
+    success = wifi_mgr.connect(ssid, password)
+    return jsonify({'success': success})
+
+
 @app.route('/update', methods=['POST'])
 def update_app():
     import subprocess
@@ -1324,6 +1434,11 @@ if __name__ == '__main__':
     camera_thread = Thread(target=camera_task)
     camera_thread.daemon = True
     camera_thread.start()
+
+    # Start the WiFi watchdog task
+    wifi_thread = Thread(target=wifi_watchdog_task)
+    wifi_thread.daemon = True
+    wifi_thread.start()
 
     # Define the host and port
     host = '0.0.0.0'

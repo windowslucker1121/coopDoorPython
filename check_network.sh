@@ -23,6 +23,16 @@ log() {
 log "Starting up. Checking network via $PING_IP."
 disconnect_time=0
 while true; do
+  # Skip reboot/restart if AP mode or hotspot is active
+  if nmcli -t -f TYPE connection show --active 2>/dev/null | grep -q "802-11-wireless"; then
+      # If Hotspot is the active connection, consider we are in fallback mode
+      if nmcli -t -f NAME connection show --active | grep -Eqi "Hotspot|AP"; then
+          disconnect_time=0
+          sleep $CONNECTIVITY_CHECK_INTERVAL
+          continue
+      fi
+  fi
+
   if ping -c 1 $PING_IP >/dev/null; then
     log "Network is up."
     disconnect_time=0
