@@ -90,42 +90,84 @@ socketio = SocketIO(app, async_mode='gevent')
 import re
 from flask import redirect
 
+def get_ap_ip():
+    # Option 1: fixed default, overrideable from config.yaml
+    wifi_cfg = global_vars.instance().get_value("wifi") or WIFI_DEFAULTS
+    return wifi_cfg.get("ap_ip", "10.42.0.1")
+
+def get_ap_base_url():
+    return f"http://{get_ap_ip()}"
+
+def get_allowed_hosts():
+    wifi_cfg = global_vars.instance().get_value("wifi") or WIFI_DEFAULTS
+    hosts = wifi_cfg.get("ap_allowed_hosts") or []
+
+    # Always allow localhost + system hostname
+    try:
+        sys_host = os.uname().nodename
+    except Exception:
+        sys_host = "raspberrypi"
+
+    defaults = ["localhost", sys_host, "dinky-coop", "dinkycoop"]
+    # de-duplicate
+    return list({*hosts, *defaults})
+
+
 @app.before_request
 def check_captive_portal():
+    # do not interfere with static and API
     if request.path.startswith('/static/') or request.path.startswith('/api/'):
         return
 
-    # Verify WifiManager exists and AP mode is active before doing captive portal redirects
+    # only in AP mode
     if 'wifi_mgr' in globals() and not wifi_mgr.is_ap_mode_active():
         return
 
     host_header = request.headers.get('Host', '').lower()
-    
-    # Check if host is an IPv4 address (with or without port)
     ipv4_pattern = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}(:\d+)?$')
-    
-    # If there's no host header or it's an IP address, we don't redirect to avoid infinite loops,
-    # EXCEPT we should explicitly handle an edge case where Android checks /generate_204 directly
-    # on the IP address or without a Host header. For that, see the explicit route below.
-    if not host_header or ipv4_pattern.match(host_header):
+
+    # if no Host at all: treat as captive and send to portal
+    if not host_header:
+        return redirect(get_ap_base_url() + "/", code=302)
+
+    # Host is an IP (user is already on AP IP) → let it through
+    if ipv4_pattern.match(host_header):
         return
-        
+
     hostname = host_header.split(':')[0]
-    valid_hostnames = ['localhost', 'raspberrypi', 'dinky-coop', 'dinkycoop']
-    
+    valid_hostnames = get_allowed_hosts()
+
+    # first‑party hostnames are allowed, also *.local
     if hostname in valid_hostnames or hostname.endswith('.local'):
         return
 
-    # If we get here, it is likely an OS captive portal check.
-    # Redirect to the AP IP without port 5000 (Android's captive portal browser sometimes blocks non-standard ports).
-    # iptables will natively redirect this to port 5000.
-    return redirect('http://10.42.0.1/', code=302)
+    # everything else in AP mode is considered captive-probe → send to portal
+    return redirect(get_ap_base_url() + "/", code=302)
 
-# Explicit fallback routes for Android captive portals if they bypass the host check
+
+# Android probe fallback (main work already done by before_request)
 @app.route('/generate_204')
 @app.route('/gen_204')
 def android_captive_portal():
-    return redirect('http://10.42.0.1/', code=302)
+    return redirect(get_ap_base_url() + "/", code=302)
+
+
+# iOS/macOS captive portal probe handlers
+@app.route('/hotspot-detect.html')
+@app.route('/success.html')
+def apple_captive():
+    target = get_ap_base_url() + "/"
+    return f"""
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="0;url={target}">
+      </head>
+      <body>
+        <p>Redirecting to portal... If nothing happens, <a href="{target}">click here</a>.</p>
+      </body>
+    </html>
+    """, 200
+
 
 log_buffer = deque(maxlen=100)
 camera = None
@@ -189,6 +231,8 @@ WIFI_DEFAULTS = {
     "timeout": 60,
     "ap_ssid": "DINKY-COOP",
     "ap_password": "password",
+    "ap_ip": "10.42.0.1",
+    "ap_allowed_hosts": [],
 }
 
 def save_config():

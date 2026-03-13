@@ -73,20 +73,49 @@ class WifiManager:
     def _setup_captive_portal(self):
         if self.is_windows:
             return
-        
+
         try:
             logger.info("Setting up Captive Portal routing...")
-            # 1. Provide a dnsmasq config so ALL domains resolve to local 10.42.0.1
-            # NetworkManager reads this when starting a shared connection's dnsmasq.
+
+            # read AP IP from config.yaml via global_vars (same defaults as Flask)
+            try:
+                from protected_dict import protected_dict as global_vars
+                WIFI_DEFAULTS = {
+                    "ssid": "",
+                    "password": "",
+                    "timeout": 60,
+                    "ap_ssid": "DINKY-COOP",
+                    "ap_password": "password",
+                    "ap_ip": "10.42.0.1",
+                    "ap_allowed_hosts": [],
+                }
+                wifi_cfg = global_vars.instance().get_value("wifi") or WIFI_DEFAULTS
+                ap_ip = wifi_cfg.get("ap_ip", "10.42.0.1")
+            except Exception:
+                ap_ip = "10.42.0.1"
+
+            # 1. dnsmasq: resolve ALL domains to ap_ip
             dnsmasq_dir = "/etc/NetworkManager/dnsmasq-shared.d"
             if os.path.exists("/etc/NetworkManager"):
                 subprocess.run(["sudo", "mkdir", "-p", dnsmasq_dir], check=False)
                 conf_path = os.path.join(dnsmasq_dir, "captive_portal.conf")
-                subprocess.run(["sudo", "bash", "-c", f"echo 'address=/#/10.42.0.1' > {conf_path}"], check=False)
+                subprocess.run(
+                    ["sudo", "bash", "-c", f"echo 'address=/#/{ap_ip}' > {conf_path}"],
+                    check=False
+                )
 
-            # 2. Redirect port 80 to 5000 using iptables to catch HTTP checks
-            subprocess.run(["sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wlan0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"], stderr=subprocess.DEVNULL)
-            subprocess.run(["sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "-i", "wlan0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"], stderr=subprocess.DEVNULL)
+            # 2. Redirect port 80 on wlan0 to Flask port 5000
+            subprocess.run(
+                ["sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wlan0",
+                "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"],
+                stderr=subprocess.DEVNULL
+            )
+            subprocess.run(
+                ["sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "-i", "wlan0",
+                "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"],
+                stderr=subprocess.DEVNULL
+            )
+
         except Exception as e:
             logger.error(f"Error setting up captive portal: {e}")
 
