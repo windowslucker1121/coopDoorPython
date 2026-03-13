@@ -100,12 +100,14 @@ def check_captive_portal():
         return
 
     host_header = request.headers.get('Host', '').lower()
-    if not host_header:
-        return
-        
+    
     # Check if host is an IPv4 address (with or without port)
     ipv4_pattern = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}(:\d+)?$')
-    if ipv4_pattern.match(host_header):
+    
+    # If there's no host header or it's an IP address, we don't redirect to avoid infinite loops,
+    # EXCEPT we should explicitly handle an edge case where Android checks /generate_204 directly
+    # on the IP address or without a Host header. For that, see the explicit route below.
+    if not host_header or ipv4_pattern.match(host_header):
         return
         
     hostname = host_header.split(':')[0]
@@ -115,8 +117,15 @@ def check_captive_portal():
         return
 
     # If we get here, it is likely an OS captive portal check.
-    # Redirect to the AP IP.
-    return redirect('http://10.42.0.1:5000/', code=302)
+    # Redirect to the AP IP without port 5000 (Android's captive portal browser sometimes blocks non-standard ports).
+    # iptables will natively redirect this to port 5000.
+    return redirect('http://10.42.0.1/', code=302)
+
+# Explicit fallback routes for Android captive portals if they bypass the host check
+@app.route('/generate_204')
+@app.route('/gen_204')
+def android_captive_portal():
+    return redirect('http://10.42.0.1/', code=302)
 
 log_buffer = deque(maxlen=100)
 camera = None
