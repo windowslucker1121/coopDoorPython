@@ -112,6 +112,14 @@ def get_allowed_hosts():
     # de-duplicate
     return list({*hosts, *defaults})
 
+@app.route("/generate_204")
+def android_generate_204():
+    return redirect(get_ap_base_url(), code=302)
+
+@app.route("/gen_204")
+def android_gen_204():
+    return redirect(get_ap_base_url(), code=302)
+
 
 @app.before_request
 def check_captive_portal():
