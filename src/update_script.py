@@ -32,11 +32,20 @@ def main():
         # The git repo root is one level up from src
         repo_dir = os.path.dirname(script_dir)
         os.chdir(repo_dir)
+
+        # Cleanup potentially corrupted git objects before pull
+        if os.name != 'nt':
+            print("Cleaning up potentially empty git objects...")
+            subprocess.run(["find", ".git/objects/", "-type", "f", "-size", "0", "-delete"], check=False)
+        
+        # If the repository is in a detached or messed up state, this might be needed
+        subprocess.run(["git", "fetch", "--all"], check=False)
+        subprocess.run(["git", "reset", "--hard", "@{u}"], check=False)
         
         subprocess.run(["git", "pull"], check=True)
-        print("Git pull successful.")
+        print("Git update successful.")
     except subprocess.CalledProcessError as e:
-        print(f"Git pull failed: {e}")
+        print(f"Git update failed: {e}")
         # We still try to restart the app even if git pull fails
     
     # Restart the app

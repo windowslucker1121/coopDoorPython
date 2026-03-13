@@ -1217,12 +1217,13 @@ def update_app():
     service_name = ''
     if os.name != 'nt' and os.environ.get('INVOCATION_ID'):
         try:
-            service_name = subprocess.check_output(
-                ['systemctl', 'show', '--value', '-p', 'Id', '--pid', pid],
-                text=True
-            ).strip()  # e.g. 'chicken.service'
-        except Exception:
-            pass
+            with open(f"/proc/{pid}/cgroup", "r") as f:
+                for line in f:
+                    if ".service" in line:
+                        service_name = line.strip().split("/")[-1]
+                        break
+        except Exception as e:
+            logger.error(f"Failed to get service name: {e}")
 
     cmd = [sys.executable, update_script_path, app_path, pid]
     if service_name:
