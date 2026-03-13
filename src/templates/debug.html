@@ -162,7 +162,10 @@
         .gpio-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
         .gpio-field { display: flex; flex-direction: column; gap: 3px; font-size: 0.82rem; }
         .gpio-field label { font-weight: 600; color: var(--text-muted); font-size: 0.75rem; }
-        .gpio-field input[type="number"] {
+        .gpio-field input[type="number"],
+        .gpio-field input[type="text"],
+        .gpio-field input[type="password"],
+        .gpio-field select {
             padding: 5px 8px;
             border: 1px solid var(--border);
             border-radius: 6px;
@@ -171,7 +174,7 @@
             font-size: 0.82rem;
             width: 100%;
         }
-        .gpio-field input:focus { outline: 2px solid var(--accent); }
+        .gpio-field input:focus, .gpio-field select:focus { outline: 2px solid var(--accent); }
         .gpio-field.full-width { grid-column: 1 / -1; }
         .gpio-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
         .gpio-checkbox-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
