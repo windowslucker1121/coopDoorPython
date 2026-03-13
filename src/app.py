@@ -506,6 +506,7 @@ def wifi_watchdog_task():
     ap_ssid = wifi_config.get("ap_ssid", "DINKY-COOP")
     ap_password = wifi_config.get("ap_password", "password")
 
+    logger.info(f"WiFi watchdog configuration: target_ssid='{target_ssid}', timeout={timeout_sec}s, ap_ssid='{ap_ssid}'")
     current_conn = wifi_mgr.get_current_connection()
     if wifi_mgr.is_ap_mode_active():
         logger.info("Device is already in AP mode. Watchdog will not interfere.")
