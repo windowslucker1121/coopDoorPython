@@ -420,8 +420,13 @@
     </div>
 
     <script>
-        const socket = io();
-
+        let socket = null;
+        try {
+            socket = io();
+            socket.on('debug_data', function(data) { /* ... */ });
+        } catch (e) {
+            console.warn('Socket.IO unavailable, live updates disabled.', e);
+        }
         // ── Section collapse ────────────────────────
         function toggleSection(sectionId, headerEl) {
             const section = document.getElementById(sectionId);
