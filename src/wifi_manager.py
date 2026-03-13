@@ -2,11 +2,15 @@ import subprocess
 import os
 import logging
 
+import time
+
 logger = logging.getLogger(__name__)
 
 class WifiManager:
     def __init__(self):
         self.is_windows = (os.name == 'nt')
+        self._ap_mode_cache = False
+        self._ap_mode_cache_time = 0
 
     def scan_networks(self):
         if self.is_windows:
@@ -66,12 +70,34 @@ class WifiManager:
             logger.error(f"Exception in connect: {e}")
             return False
 
+    def _setup_captive_portal(self):
+        if self.is_windows:
+            return
+        
+        try:
+            logger.info("Setting up Captive Portal routing...")
+            # 1. Provide a dnsmasq config so ALL domains resolve to local 10.42.0.1
+            # NetworkManager reads this when starting a shared connection's dnsmasq.
+            dnsmasq_dir = "/etc/NetworkManager/dnsmasq-shared.d"
+            if os.path.exists("/etc/NetworkManager"):
+                subprocess.run(["sudo", "mkdir", "-p", dnsmasq_dir], check=False)
+                conf_path = os.path.join(dnsmasq_dir, "captive_portal.conf")
+                subprocess.run(["sudo", "bash", "-c", f"echo 'address=/#/10.42.0.1' > {conf_path}"], check=False)
+
+            # 2. Redirect port 80 to 5000 using iptables to catch HTTP checks
+            subprocess.run(["sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wlan0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "-i", "wlan0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "5000"], stderr=subprocess.DEVNULL)
+        except Exception as e:
+            logger.error(f"Error setting up captive portal: {e}")
+
     def start_ap(self, ssid, password):
         if self.is_windows:
             logger.info(f"Starting AP mode with SSID {ssid} and password {password} (mocked)")
             return True
 
         try:
+            self._setup_captive_portal()
+            
             # We use "nmcli dev wifi hotspot"
             # In nmcli, the hotspot usually gets connection name "Hotspot"
             cmd = ["nmcli", "dev", "wifi", "hotspot", "ifname", "wlan0", "ssid", ssid, "password", password]
@@ -88,14 +114,24 @@ class WifiManager:
     def is_ap_mode_active(self):
         if self.is_windows:
             return False
+            
+        # simple 30 second cache to prevent slowing down the web app during captive portal checks
+        if time.time() - self._ap_mode_cache_time < 30:
+            return self._ap_mode_cache
+            
         try:
             cmd = ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"]
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
+            is_active = False
             for line in output.split("\n"):
                 if "802-11-wireless" in line and "wlan0" in line:
                     if "Hotspot" in line or "AP" in line:
-                        return True
-            return False
+                        is_active = True
+                        break
+            
+            self._ap_mode_cache = is_active
+            self._ap_mode_cache_time = time.time()
+            return is_active
         except:
             return False
 

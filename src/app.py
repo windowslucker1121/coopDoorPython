@@ -87,6 +87,37 @@ app = Flask(__name__, template_folder="templates")
 app.config['SECRET_KEY'] = 'secret_key'
 socketio = SocketIO(app, async_mode='gevent')
 
+import re
+from flask import redirect
+
+@app.before_request
+def check_captive_portal():
+    if request.path.startswith('/static/') or request.path.startswith('/api/'):
+        return
+
+    # Verify WifiManager exists and AP mode is active before doing captive portal redirects
+    if 'wifi_mgr' in globals() and not wifi_mgr.is_ap_mode_active():
+        return
+
+    host_header = request.headers.get('Host', '').lower()
+    if not host_header:
+        return
+        
+    # Check if host is an IPv4 address (with or without port)
+    ipv4_pattern = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}(:\d+)?$')
+    if ipv4_pattern.match(host_header):
+        return
+        
+    hostname = host_header.split(':')[0]
+    valid_hostnames = ['localhost', 'raspberrypi', 'dinky-coop', 'dinkycoop']
+    
+    if hostname in valid_hostnames or hostname.endswith('.local'):
+        return
+
+    # If we get here, it is likely an OS captive portal check.
+    # Redirect to the AP IP.
+    return redirect('http://10.42.0.1:5000/', code=302)
+
 log_buffer = deque(maxlen=100)
 camera = None
 ##################################
