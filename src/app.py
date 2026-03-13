@@ -1148,6 +1148,24 @@ def api_set_gpio_config():
 from wifi_manager import WifiManager
 wifi_mgr = WifiManager()
 
+@app.route('/api/wifi-status', methods=['GET'])
+def api_wifi_status():
+    """Return the current network status."""
+    return jsonify({
+        'ethernet_connected': wifi_mgr.is_ethernet_connected(),
+        'ap_mode_active': wifi_mgr.is_ap_mode_active(),
+        'current_connection': wifi_mgr.get_current_connection()
+    })
+
+@app.route('/api/wifi-ap', methods=['POST'])
+def api_wifi_ap():
+    """Immediately switch to AP mode."""
+    wifi_config = global_vars.instance().get_value("wifi") or dict(WIFI_DEFAULTS)
+    ap_ssid = wifi_config.get("ap_ssid", "DINKY-COOP")
+    ap_password = wifi_config.get("ap_password", "password")
+    success = wifi_mgr.start_ap(ap_ssid, ap_password)
+    return jsonify({'success': success})
+
 @app.route('/api/wifi-scan', methods=['GET'])
 def api_wifi_scan():
     """Scan and return available WiFi networks."""

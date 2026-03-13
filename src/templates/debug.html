@@ -323,46 +323,54 @@
     <div class="card">
         <h2 onclick="toggleSection('wifiConfigSection', this)">📶 Wi-Fi Configuration <span class="chevron">▼</span></h2>
         <div id="wifiConfigSection" class="section-body">
-            <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
-                Configure the primary Wi-Fi connection and the fallback Access Point (AP) mode settings.
-            </p>
-            <form class="gpio-form" id="wifiForm" onsubmit="return false;">
-                <div class="gpio-field full-width">
-                    <label>Scan Wi-Fi Networks</label>
-                    <button type="button" class="btn btn-secondary" onclick="scanWifi()" id="btnScanWifi" style="margin-bottom: 8px;">🔍 Scan Wi-Fi</button>
-                    <select id="wf_ssid_select" onchange="document.getElementById('wf_ssid').value = this.value;" style="width: 100%; padding: 4px; display: none; margin-bottom: 8px;"></select>
-                </div>
-                <div class="gpio-field">
-                    <label>Target SSID</label>
-                    <input type="text" id="wf_ssid" name="ssid" placeholder="MyWiFiNetwork">
-                </div>
-                <div class="gpio-field">
-                    <label>Wi-Fi Password</label>
-                    <input type="password" id="wf_password" name="password" placeholder="Leave empty if open">
-                </div>
-                <div class="gpio-field">
-                    <label>Connection Timeout (s)</label>
-                    <input type="number" min="10" max="600" id="wf_timeout" name="timeout">
-                </div>
-                
-                <h3 style="grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; font-size: 1rem; color: var(--text);">Fallback AP Mode</h3>
-                
-                <div class="gpio-field">
-                    <label>AP SSID</label>
-                    <input type="text" id="wf_ap_ssid" name="ap_ssid">
-                </div>
-                <div class="gpio-field">
-                    <label>AP Password</label>
-                    <input type="text" id="wf_ap_password" name="ap_password">
-                </div>
-                
-                <div id="wifiStatus" class="gpio-status" style="grid-column: 1 / -1;"></div>
-                <div class="gpio-actions" style="grid-column: 1 / -1;">
-                    <button type="button" class="btn btn-primary" onclick="saveWifiConfig()">💾 Save to config.yaml</button>
-                    <button type="button" class="btn btn-secondary" onclick="loadWifiConfig()">🔄 Reload</button>
-                    <button type="button" class="btn btn-danger" onclick="testWifiConnection()" style="margin-left: 10px;">🔌 Connect Now</button>
-                </div>
-            </form>
+            
+            <div id="ethernetStatusMessage" style="display: none; color: var(--success); font-weight: bold; margin-bottom: 12px; padding: 10px; background: var(--surface-alt); border-radius: 6px;">
+                🔌 Ethernet is connected. Wi-Fi configuration is disabled.
+            </div>
+
+            <div id="wifiConfigurationWrapper">
+                <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
+                    Configure the primary Wi-Fi connection and the fallback Access Point (AP) mode settings.
+                </p>
+                <form class="gpio-form" id="wifiForm" onsubmit="return false;">
+                    <div class="gpio-field full-width">
+                        <label>Scan Wi-Fi Networks</label>
+                        <button type="button" class="btn btn-secondary" onclick="scanWifi()" id="btnScanWifi" style="margin-bottom: 8px;">🔍 Scan Wi-Fi</button>
+                        <select id="wf_ssid_select" onchange="document.getElementById('wf_ssid').value = this.value;" style="width: 100%; padding: 4px; display: none; margin-bottom: 8px;"></select>
+                    </div>
+                    <div class="gpio-field">
+                        <label>Target SSID</label>
+                        <input type="text" id="wf_ssid" name="ssid" placeholder="MyWiFiNetwork">
+                    </div>
+                    <div class="gpio-field">
+                        <label>Wi-Fi Password</label>
+                        <input type="password" id="wf_password" name="password" placeholder="Leave empty if open">
+                    </div>
+                    <div class="gpio-field">
+                        <label>Connection Timeout (s)</label>
+                        <input type="number" min="10" max="600" id="wf_timeout" name="timeout">
+                    </div>
+                    
+                    <h3 style="grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; font-size: 1rem; color: var(--text);">Fallback AP Mode</h3>
+                    
+                    <div class="gpio-field">
+                        <label>AP SSID</label>
+                        <input type="text" id="wf_ap_ssid" name="ap_ssid">
+                    </div>
+                    <div class="gpio-field">
+                        <label>AP Password</label>
+                        <input type="text" id="wf_ap_password" name="ap_password">
+                    </div>
+                    
+                    <div id="wifiStatus" class="gpio-status" style="grid-column: 1 / -1;"></div>
+                    <div class="gpio-actions" style="grid-column: 1 / -1;">
+                        <button type="button" class="btn btn-primary" onclick="saveWifiConfig()">💾 Save to config.yaml</button>
+                        <button type="button" class="btn btn-secondary" onclick="loadWifiConfig()">🔄 Reload</button>
+                        <button type="button" class="btn btn-danger" onclick="testWifiConnection()" style="margin-left: 10px;">🔌 Connect Wi-Fi Now</button>
+                        <button type="button" class="btn btn-danger" onclick="switchToAPMode()">📡 Switch to AP Mode</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -678,9 +686,38 @@
             .catch(e => showWifiStatus('Network error: ' + e, 'error'));
         }
 
+        function switchToAPMode() {
+            showWifiStatus('Switching to AP mode... please wait', 'success');
+            fetch('/api/wifi-ap', { method: 'POST' })
+            .then(async r => {
+                const res = await r.json();
+                if (r.ok && res.success) {
+                    showWifiStatus('Successfully switched to AP mode.', 'success');
+                } else {
+                    showWifiStatus('Failed to switch to AP mode.', 'error');
+                }
+            })
+            .catch(e => showWifiStatus('Network error: ' + e, 'error'));
+        }
+
+        function loadNetworkStatus() {
+            fetch('/api/wifi-status')
+                .then(r => r.json())
+                .then(data => {
+                    const ethMsg = document.getElementById('ethernetStatusMessage');
+                    const wifiWrap = document.getElementById('wifiConfigurationWrapper');
+                    if (data.ethernet_connected) {
+                        ethMsg.style.display = 'block';
+                        wifiWrap.style.display = 'none';
+                    } else {
+                        ethMsg.style.display = 'none';
+                        wifiWrap.style.display = 'block';
+                    }
+                })
+                .catch(e => console.error('Failed to load network status'));
+        }
+
         // Load configs on page load
         loadGpioConfig();
         loadWifiConfig();
-    </script>
-</body>
-</html>
+        loadNetworkStatus();

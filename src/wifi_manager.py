@@ -99,6 +99,19 @@ class WifiManager:
         except:
             return False
 
+    def is_ethernet_connected(self):
+        if self.is_windows:
+            return False
+        try:
+            cmd = ["nmcli", "-t", "-f", "TYPE,STATE", "device"]
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
+            for line in output.split("\n"):
+                if "ethernet:connected" in line:
+                    return True
+            return False
+        except:
+            return False
+
     def get_current_connection(self):
         if self.is_windows:
             return {"ssid": "Mock-WiFi-1"}
