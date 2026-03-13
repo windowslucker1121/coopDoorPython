@@ -921,7 +921,6 @@ def subscribe():
 
     currentJsonContent["subscriptions"].append(subscription)
 
-    # Save subscription to database (not shown)
     with open('.subscriptions.json', 'w') as f:
         json.dump(currentJsonContent, f)
 
