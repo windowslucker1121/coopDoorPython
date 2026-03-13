@@ -1477,6 +1477,7 @@ def load_notification_keys():
             global_vars.instance().set_values(yaml_config["secrets"])
     else:
         logger.critical("No secrets file found - the system will missbehave without it.")
+        logger.critical("Run generate_vapid_keys.py and save the output in .secrets.yaml to fix this.")
 
 if __name__ == '__main__':
     

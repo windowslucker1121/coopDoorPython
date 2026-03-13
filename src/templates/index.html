@@ -362,8 +362,8 @@
             return outputArray;
             }
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/socket.io.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chart.umd.js') }}"></script>
     <script>
          var socket = io();
         let current_state = ""
