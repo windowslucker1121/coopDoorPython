@@ -1265,6 +1265,15 @@ def api_wifi_connect():
         return jsonify({'error': 'SSID is required'}), 400
     
     success = wifi_mgr.connect(ssid, password)
+    
+    if not success:
+        logger.warning(f"Failed to connect to {ssid}, waiting 5 seconds before starting AP mode to prevent lockout.")
+        time.sleep(5)
+        wifi_config = global_vars.instance().get_value("wifi") or WIFI_DEFAULTS
+        ap_ssid = wifi_config.get("ap_ssid", "DINKY-COOP")
+        ap_password = wifi_config.get("ap_password", "password")
+        wifi_mgr.start_ap(ap_ssid, ap_password)
+
     return jsonify({'success': success})
 
 
