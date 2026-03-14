@@ -1658,6 +1658,18 @@
                     <span class="sensor-label">Git Commit</span>
                     <span id="git_commit" style="font-weight:600; font-family: 'Courier New', monospace;"></span>
                 </div>
+
+                <div class="divider-text">System Time</div>
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Set Device Time</label>
+                        <div style="display:flex; gap:8px;">
+                            <input type="datetime-local" id="sys_time_input" step="1" style="flex:1;">
+                            <button type="button" class="btn btn-open" onclick="syncClientTime()" style="padding:0 12px; font-size:1.2rem;" title="Copy Client Time">⏱️</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-reference" style="width:100%; margin-top:4px;" onclick="applySystemTime()">Apply Time to Device</button>
+                </div>
             </div>
         </div>
 
@@ -2134,6 +2146,52 @@
             socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
             localStorage.setItem('sunrise_offset', sunrise_offset);
             localStorage.setItem('sunset_offset',  sunset_offset);
+        }
+
+        /* ── System Time ───────────────────────────── */
+        function formatLocalZ(dateObj) {
+            const pad = n => String(n).padStart(2, '0');
+            return dateObj.getFullYear() + '-' +
+                   pad(dateObj.getMonth() + 1) + '-' +
+                   pad(dateObj.getDate()) + 'T' +
+                   pad(dateObj.getHours()) + ':' +
+                   pad(dateObj.getMinutes()) + ':' +
+                   pad(dateObj.getSeconds());
+        }
+
+        function syncClientTime() {
+            const now = new Date();
+            document.getElementById('sys_time_input').value = formatLocalZ(now);
+        }
+
+        async function applySystemTime() {
+            let val = document.getElementById('sys_time_input').value;
+            if (!val) {
+                alert("Please enter or sync a time first.");
+                return;
+            }
+            // Some browsers omit seconds if they are 00, ensure format length
+            if (val.length === 16) {
+                val += ":00";
+            }
+            // convert "YYYY-MM-DDTHH:MM:SS" to "YYYY-MM-DD HH:MM:SS"
+            const timeStr = val.replace('T', ' ');
+            try {
+                const res = await fetch('/api/system/time', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ time: timeStr })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(data.message || "Time updated successfully.");
+                } else {
+                    alert("Error updating time: " + (data.error || "Unknown"));
+                }
+            } catch (err) {
+                console.error("Failed to set time:", err);
+                alert("Failed to communicate with device.");
+            }
         }
 
         /* ── Data Visualization (REST-based, replaces old socket csv_data) ── */

@@ -1268,6 +1268,35 @@ def api_wifi_status():
         'current_connection': wifi_mgr.get_current_connection()
     })
 
+@app.route('/api/system/time', methods=['POST'])
+def api_set_system_time():
+    """Set the system date and time."""
+    data = request.json
+    if not data or 'time' not in data:
+        return jsonify({'error': 'Time is required'}), 400
+
+    new_time = data['time']
+    try:
+        # Validate format (Expected: YYYY-MM-DD HH:MM:SS)
+        datetime.strptime(new_time, '%Y-%m-%d %H:%M:%S')
+        
+        if os.name != 'nt':
+            result = subprocess.run(['sudo', 'date', '-s', new_time], capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info(f"System time set to {new_time}")
+                return jsonify({'message': 'System time successfully updated.'})
+            else:
+                logger.error(f"Failed to set system time: {result.stderr}")
+                return jsonify({'error': f"Failed to set system time: {result.stderr}"}), 500
+        else:
+            logger.warning(f"[Mock] Setting system time on Windows: {new_time}")
+            return jsonify({'message': 'System time mock updated successfully (Windows)'})
+    except ValueError:
+        return jsonify({'error': "Invalid date format. Required: YYYY-MM-DD HH:MM:SS"}), 400
+    except Exception as e:
+        logger.error(f"Exception setting system time: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/wifi-ap', methods=['POST'])
 def api_wifi_ap():
     """Immediately switch to AP mode."""
