@@ -21,3 +21,4 @@ config.yaml
 .subscriptions.json
 src/log.txt
 log.txt
+version.txt
