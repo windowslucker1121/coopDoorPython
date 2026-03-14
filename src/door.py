@@ -272,12 +272,12 @@ class DOOR():
         if o_read != c_read:
             if o_read == GPIO.HIGH:
                 #logger.debug("Opening!")
-                logger.debug("Manuel Switch to UP activated.")
+                logger.info("[Hardware Switch] User commanded door to OPEN.")
                 self.override = True
                 self.open()
             elif c_read == GPIO.HIGH:
                 #logger.debug("Closing!")
-                logger.debug("Manuel Switch to DOWN activated.")
+                logger.info("[Hardware Switch] User commanded door to CLOSE.")
                 self.override = True
                 self.close()
 

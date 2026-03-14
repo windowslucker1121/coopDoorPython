@@ -112,6 +112,9 @@ def _init_gv(
     debug_error: bool = False,
     sunrise_offset: int = 0,
     sunset_offset: int = 0,
+    timer_mode: str = "False",
+    timer_open_time: str = "08:00",
+    timer_close_time: str = "20:00",
 ) -> None:
     """Populate global_vars with sensible defaults for a test."""
     global_vars.instance().set_values(
@@ -124,6 +127,9 @@ def _init_gv(
             "debug_error": debug_error,
             "sunrise_offset": sunrise_offset,
             "sunset_offset": sunset_offset,
+            "timer_mode": timer_mode,
+            "timer_open_time": timer_open_time,
+            "timer_close_time": timer_close_time,
         }
     )
 
@@ -891,3 +897,55 @@ class TestBasicDoorMovement:
             runner.step()
 
         assert door.ErrorState() is True
+
+
+# ── Timer Mode ─────────────────────────────────────────────────────────────────
+
+class TestTimerMode:
+    def test_timer_mode_opens_door_at_set_time(self):
+        """Door transitions to open when current time enters timer open window."""
+        _init_gv(timer_mode="True", timer_open_time="08:00", timer_close_time="20:00")
+        door = DOOR()
+        
+        # Test time: 08:30 (inside open window)
+        dummy_tz = pytz.timezone("America/Denver")
+        test_now = dummy_tz.localize(datetime(2025, 1, 1, 8, 30))
+        
+        runner = _make_runner(door, now_override=test_now)
+        runner.step()
+        runner.step()
+        assert door.get_state() == "opening"
+        
+        _trigger_upper()
+        runner.step()
+        assert door.get_state() == "open"
+        assert global_vars.instance().get_value("desired_door_state") == "open"
+
+    def test_timer_mode_closes_door_at_set_time(self):
+        """Door transitions to closed when current time falls into the timer close period."""
+        _init_gv(timer_mode="True", timer_open_time="08:00", timer_close_time="20:00")
+        door = DOOR()
+        
+        # Test time: 20:30 (inside close window)
+        dummy_tz = pytz.timezone("America/Denver")
+        test_now = dummy_tz.localize(datetime(2025, 1, 1, 20, 30))
+        
+        runner = _make_runner(door, now_override=test_now)
+        runner.step()
+        runner.step()
+        assert door.get_state() == "closing"
+        
+        _trigger_lower()
+        runner.step()
+        assert door.get_state() == "closed"
+        assert global_vars.instance().get_value("desired_door_state") == "closed"
+        
+    def test_timer_mode_disabled_when_endstops_missing(self):
+        """Timer mode disables itself if reference_door_endstops_ms is None."""
+        _init_gv(timer_mode="True", reference_door_endstops_ms=None)
+        door = DOOR()
+        dummy_tz = pytz.timezone("America/Denver")
+        test_now = dummy_tz.localize(datetime(2025, 1, 1, 12, 0))
+        runner = _make_runner(door, now_override=test_now)
+        runner.step()
+        assert global_vars.instance().get_value("timer_mode") == "False"

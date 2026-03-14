@@ -482,7 +482,7 @@
         .update-btn:hover { opacity: 0.85; }
 
         /* ── Install banner ─────────────────────────────────── */
-        .install-banner {
+        .install-banner, .time-warning-banner {
             display: none;
             text-align: center;
             padding: 12px 16px;
@@ -491,9 +491,19 @@
             margin-bottom: 12px;
         }
 
-        .install-banner .btn {
+        .time-warning-banner {
+            background: var(--btn-reference);
+            color: var(--text);
+        }
+
+        .install-banner .btn, .time-warning-banner .btn {
             background: #fff;
             color: var(--accent);
+        }
+        
+        .time-warning-banner .btn {
+            color: var(--btn-reference);
+            margin-top: 8px;
         }
 
         /* ── Temperature widget ─────────────────────────────── */
@@ -1449,6 +1459,13 @@
             <button class="btn" id="installButton">📲 Install as App</button>
         </div>
 
+        <!-- Time Warning Banner -->
+        <div class="time-warning-banner" id="timeWarningBanner">
+            <div style="font-weight: bold; margin-bottom: 4px;">⚠️ Time Mismatch Detected</div>
+            <div style="font-size: 0.9rem;">The system time on the Coop Door seems out of sync with your device.</div>
+            <a href="#card-system" class="btn" id="fixTimeBtn" onclick="const sec = document.getElementById('system_time_settings'); if(sec && sec.style.display === 'none') toggleSection('system_time_settings', sec.previousElementSibling);">Fix System Time</a>
+        </div>
+
             <div class="dashboard-grid">
         <!-- ── Error ── -->
         <div id="error_section" class="card" style="display: none;">
@@ -1566,27 +1583,27 @@
                         </div>
                     </div>
 
-                    <!-- Right: Auto Mode -->
+                    <!-- Right: Auto/Timer Mode -->
                     <div class="door-panel">
-                        <div class="auto-header">
+                        <div class="auto-header" style="margin-bottom: 8px; padding-bottom: 8px;">
                             <h4>Auto Mode</h4>
                             <div class="toggle" id="toggle" onclick="toggleSwitch()"></div>
                         </div>
 
-                        <div id="auto_info" class="auto_info {% if auto_mode %} on{% endif %}" style="display: none;">
-                            <div class="auto-form">
+                        <div id="auto_info" class="auto_info" style="display: none;">
+                            <div class="auto-form" style="margin-bottom: 8px;">
                                 <form onsubmit="handleSubmit(event)">
                                     <div class="auto-inline-row">
                                         <label for="sunrise_offset">Open at sunrise +</label>
                                         <div class="auto-input-group">
-                                            <input type="number" id="sunrise_offset" name="sunrise_offset" step="1" maxlength="4" value={{ sunrise_offset }} required>
+                                            <input type="number" id="sunrise_offset" name="sunrise_offset" step="1" maxlength="4" value="{{ sunrise_offset }}" required>
                                             <span style="font-size: 0.85rem; color: var(--text-muted);">min</span>
                                         </div>
                                     </div>
                                     <div class="auto-inline-row">
                                         <label for="sunset_offset">Close at sunset +</label>
                                         <div class="auto-input-group">
-                                            <input type="number" id="sunset_offset" name="sunset_offset" step="1" maxlength="4" value={{ sunset_offset }} required>
+                                            <input type="number" id="sunset_offset" name="sunset_offset" step="1" maxlength="4" value="{{ sunset_offset }}" required>
                                             <span style="font-size: 0.85rem; color: var(--text-muted);">min</span>
                                         </div>
                                     </div>
@@ -1594,7 +1611,7 @@
                                 </form>
                             </div>
 
-                            <div class="auto-timetable">
+                            <div class="auto-timetable" style="margin-bottom: 12px;">
                                 <div class="time-box">
                                     <div class="time-box-label">🌅 Sunrise</div>
                                     <div class="time-box-value" id="sunrise">--:--</div>
@@ -1613,6 +1630,32 @@
                                 </div>
                             </div>
                         </div>
+
+                        <div class="auto-header" style="margin-top: 8px; margin-bottom: 8px; padding-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px;">
+                            <h4>Timer Mode</h4>
+                            <div class="toggle" id="toggle_timer" onclick="toggleTimerSwitch()"></div>
+                        </div>
+
+                        <div id="timer_info" class="auto_info" style="display: none;">
+                            <div class="auto-form" style="margin-bottom: 8px;">
+                                <form onsubmit="handleTimerSubmit(event)">
+                                    <div class="auto-inline-row">
+                                        <label for="timer_open_time">Open at</label>
+                                        <div class="auto-input-group">
+                                            <input type="time" id="timer_open_time" name="timer_open_time" style="width: auto; padding: 6px 8px; font-size: 0.95rem; border-radius: var(--radius-sm); border: 1px solid var(--border);" value="{{ timer_open_time }}" required>
+                                        </div>
+                                    </div>
+                                    <div class="auto-inline-row">
+                                        <label for="timer_close_time">Close at</label>
+                                        <div class="auto-input-group">
+                                            <input type="time" id="timer_close_time" name="timer_close_time" style="width: auto; padding: 6px 8px; font-size: 0.95rem; border-radius: var(--radius-sm); border: 1px solid var(--border);" value="{{ timer_close_time }}" required>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-open" type="submit" style="width: 100%; margin-top: 8px;">Save Times</button>
+                                </form>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -1659,8 +1702,10 @@
                     <span id="git_commit" style="font-weight:600; font-family: 'Courier New', monospace;"></span>
                 </div>
 
-                <div class="divider-text">System Time</div>
-                <div class="form-grid">
+                <div class="divider-text collapsible-header collapsed" onclick="toggleSection('system_time_settings', this)" style="cursor: pointer; border-bottom: none; background: transparent; padding: 0;">
+                    System Time <span class="chevron" style="display:inline-block; margin-left:8px; font-size:0.7rem;">▼</span>
+                </div>
+                <div id="system_time_settings" class="form-grid" style="display: none;">
                     <div class="form-row">
                         <label>Set Device Time</label>
                         <div style="display:flex; gap:8px;">
@@ -2002,8 +2047,31 @@
         /* ── Socket.IO ─────────────────────────────── */
         var socket = io();
         let current_state = "";
+        let current_auto_mode = "False";
+        let current_timer_mode = "False";
+        let _time_sync_logged = false;
 
         socket.on('data', function(data) {
+            if (data.os_timestamp) {
+                const diffMs = Math.abs(Date.now() - (data.os_timestamp * 1000));
+                const timeBanner = document.getElementById('timeWarningBanner');
+                
+                if (!_time_sync_logged) {
+                    if (diffMs > 120000) {
+                        console.warn(`[Time Sync] Mismatch! RP Time: ${new Date(data.os_timestamp * 1000).toLocaleString()}, System Time: ${new Date().toLocaleString()}, Diff: ${diffMs}ms`);
+                    } else {
+                        console.log(`[Time Sync] Equal/Matched. RP Time: ${new Date(data.os_timestamp * 1000).toLocaleString()}, System Time: ${new Date().toLocaleString()}, Diff: ${diffMs}ms`);
+                    }
+                    _time_sync_logged = true;
+                }
+
+                if (diffMs > 120000) { // 2 minutes
+                    if (timeBanner) timeBanner.style.display = 'block';
+                } else {
+                    if (timeBanner) timeBanner.style.display = 'none';
+                }
+            }
+
             document.getElementById('temp_in').textContent      = data.temp_in;
             document.getElementById('temp_in_min').textContent  = data.temp_in_min;
             document.getElementById('temp_in_max').textContent  = data.temp_in_max;
@@ -2057,6 +2125,15 @@
             document.getElementById('auto_info').style.display = isAutoMode ? "block" : "none";
             document.getElementById('toggle').classList.toggle('on', isAutoMode);
 
+            var isTimerMode = data.timer_mode === "True";
+            var tInfo = document.getElementById('timer_info');
+            var tToggle = document.getElementById('toggle_timer');
+            if (tInfo) tInfo.style.display = isTimerMode ? "block" : "none";
+            if (tToggle) tToggle.classList.toggle('on', isTimerMode);
+
+            // Timer values are now populated via Jinja and LocalStorage to avoid overwriting during user edits
+
+
             const doorSvg   = document.getElementById('door-svg');
             const doorLabel = document.getElementById('door-state-label');
             const doorSub   = document.getElementById('door-state-sub');
@@ -2070,9 +2147,12 @@
                     current_state = state_key;
                 }
             } else {
-                let isAuto   = (data.auto_mode === "True");
-                let modeText = isAuto ? "Auto Controlled" : "Manual Mode";
-                let state_key = data.state + "-" + isAuto;
+                let isAuto = (data.auto_mode === "True");
+                let isTimer = (data.timer_mode === "True");
+                let modeText = "Manual Mode";
+                if (isAuto) modeText = "Auto Controlled";
+                if (isTimer) modeText = "Timer Controlled";
+                let state_key = data.state + "-" + isAuto + "-" + isTimer;
 
                 if (current_state !== state_key) {
                     doorSvg.setAttribute('class', 'door-svg state-' + data.state);
@@ -2146,6 +2226,23 @@
             socket.emit('auto_offsets', { sunrise_offset, sunset_offset });
             localStorage.setItem('sunrise_offset', sunrise_offset);
             localStorage.setItem('sunset_offset',  sunset_offset);
+        }
+
+        function toggleTimerSwitch() {
+            const toggle = document.getElementById('toggle_timer');
+            toggle.classList.toggle('on');
+            const isOn = toggle.classList.contains('on');
+            socket.emit('toggle_timer', { toggle: isOn });
+            document.getElementById('timer_info').style.display = isOn ? 'block' : 'none';
+        }
+
+        function handleTimerSubmit(event) {
+            event.preventDefault();
+            const timer_open_time = document.getElementById('timer_open_time').value;
+            const timer_close_time = document.getElementById('timer_close_time').value;
+            socket.emit('timer_times', { open_time: timer_open_time, close_time: timer_close_time });
+            localStorage.setItem('timer_open_time', timer_open_time);
+            localStorage.setItem('timer_close_time', timer_close_time);
         }
 
         /* ── System Time ───────────────────────────── */
@@ -2450,7 +2547,7 @@
         /* ── Collapsibles ──────────────────────────── */
         const COLLAPSIBLE_IDS = [
             'errorSection', 'webcam_section', 'door_control',
-            'system', 'temperature', 'dataVisualizationSection',
+            'system', 'system_time_settings', 'temperature', 'dataVisualizationSection',
             'location', 'manual_location_inputs'
         ];
 
@@ -2469,7 +2566,11 @@
             const saved  = localStorage.getItem('section-' + id);
             const header = section.previousElementSibling;
             const hasHeader = header && header.classList.contains('collapsible-header');
-            if (saved === 'closed') {
+            // Default to closed for system_time_settings if not explicitly opened
+            let isClosed = (saved === 'closed');
+            if (id === 'system_time_settings' && !saved) isClosed = true;
+            
+            if (isClosed) {
                 section.style.display = "none";
                 if (hasHeader) header.classList.add('collapsed');
             } else {
@@ -2582,6 +2683,14 @@
             const savedSunset  = localStorage.getItem('sunset_offset');
             if (savedSunrise !== null) document.getElementById('sunrise_offset').value = savedSunrise;
             if (savedSunset  !== null) document.getElementById('sunset_offset').value  = savedSunset;
+
+            // Optional: fallback to local storage for timer inputs if they weren't natively rendered by Jinja but exist in LS
+            const savedTimerOpen = localStorage.getItem('timer_open_time');
+            const savedTimerClose = localStorage.getItem('timer_close_time');
+            const tOpenEl = document.getElementById('timer_open_time');
+            const tCloseEl = document.getElementById('timer_close_time');
+            if (savedTimerOpen && tOpenEl && !tOpenEl.value) tOpenEl.value = savedTimerOpen;
+            if (savedTimerClose && tCloseEl && !tCloseEl.value) tCloseEl.value = savedTimerClose;
 
             themeButton.addEventListener('click', () => {
                 const cur  = document.documentElement.getAttribute('data-theme');

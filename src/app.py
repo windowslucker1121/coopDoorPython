@@ -249,6 +249,9 @@ def save_config():
             yaml = YAML.YAML()
             to_dump = {
                 "auto_mode": global_vars.instance().get_value("auto_mode"),
+                "timer_mode": global_vars.instance().get_value("timer_mode"),
+                "timer_open_time": global_vars.instance().get_value("timer_open_time"),
+                "timer_close_time": global_vars.instance().get_value("timer_close_time"),
                 "sunrise_offset": global_vars.instance().get_value("sunrise_offset"),
                 "sunset_offset": global_vars.instance().get_value("sunset_offset"),
                 "location": global_vars.instance().get_value("location"),
@@ -267,6 +270,9 @@ def load_config():
     with config_lock:
         config_to_set = {
             "auto_mode": "True",
+            "timer_mode": "False",
+            "timer_open_time": "07:00",
+            "timer_close_time": "20:00",
             "sunrise_offset": 0,
             "sunset_offset": 0,
             "location": {
@@ -350,7 +356,7 @@ def get_all_data():
         temp_in_min, temp_in_max, hum_in_min, hum_in_max, \
         temp_out_min, temp_out_max, hum_out_min, hum_out_max, \
         cpu_temp_min, cpu_temp_max, reference_door_endstops_ms, auto_mode, error_state, camera_enabled, \
-        door_position_estimate \
+        door_position_estimate, timer_mode, timer_open_time, timer_close_time \
         = global_vars.instance().get_values(["temp_in", "hum_in", \
             "temp_out", "hum_out", "state", "override", "cpu_temp", \
             "sunrise", "sunset", "sunrise_offset", "sunset_offset", \
@@ -358,7 +364,7 @@ def get_all_data():
             "temp_out_min", "temp_out_max", "hum_out_min", "hum_out_max", \
             "cpu_temp_min", "cpu_temp_max", \
             "reference_door_endstops_ms", "auto_mode" , "error_state", "enable_camera", \
-            "door_position_estimate"])
+            "door_position_estimate", "timer_mode", "timer_open_time", "timer_close_time"])
 
     # Check if time until sunrise is positive
     time_until_open_str = None
@@ -397,6 +403,8 @@ def get_all_data():
     # Return nicely formatted data in dictionary form:
     data_dict = {
       'time': datetime.now().strftime("%H:%M:%S.%f")[:-3],
+      'os_timestamp': int(datetime.now().timestamp()),
+      'os_time_local_str': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
       'temp_in': format_temp(temp_in),
       'temp_in_min': format_temp(temp_in_min),
       'temp_in_max': format_temp(temp_in_max),
@@ -433,6 +441,9 @@ def get_all_data():
       'disk_total_gb': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').total / (1024 ** 3), 1)),
       'disk_percent': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').percent, 1)),
       'python_version': sys.version.split()[0],
+        'timer_mode': timer_mode,
+        'timer_open_time': timer_open_time,
+        'timer_close_time': timer_close_time,
     }
     return data_dict
 
@@ -686,21 +697,21 @@ def handle_disconnect():
 
 @socketio.on('open')
 def handle_open():
-    logger.debug('Open button pressed which disables auto mode')
+    logger.info('[Manual Mode] User commanded door to OPEN. Disabling auto/timer modes.')
     global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("timer_mode", "False")
     global_vars.instance().set_value("desired_door_state", "open")
 
 @socketio.on('close')
 def handle_close():
-    logger.debug('Close button pressed which disables auto mode')
-    
+    logger.info('[Manual Mode] User commanded door to CLOSE. Disabling auto/timer modes.')
     global_vars.instance().set_value("auto_mode", "False")
+    global_vars.instance().set_value("timer_mode", "False")
     global_vars.instance().set_value("desired_door_state", "closed")
 
 @socketio.on('stop')
 def handle_stop():
-    logger.debug('Stop button pressed which disables auto mode')
-    global_vars.instance().set_value("auto_mode", "False")
+    logger.info('[Manual Mode] User commanded door to STOP. Disabling auto/timer modes.')
     global_vars.instance().set_value("desired_door_state", "stopped")
 
 @socketio.on('toggle')
@@ -711,12 +722,36 @@ def handle_toggle(message):
     if toggle_value:
         logger.info('Auto Mode Enabled')
         global_vars.instance().set_value("auto_mode", "True")
+        global_vars.instance().set_value("timer_mode", "False")
     else:
         logger.info('Auto Mode Disabled')
         global_vars.instance().set_value("auto_mode", "False")
 
     logger.debug(f"current auto mode: {global_vars.instance().get_value('auto_mode')}")
     save_config()
+
+
+@socketio.on('toggle_timer')
+def handle_toggle_timer(message):
+    logger.debug('Timer Toggle button pressed')
+    toggle_value = message['toggle']
+    logger.debug(f'Timer Toggle button pressed: {toggle_value}')
+    if toggle_value:
+        logger.info('Timer Mode Enabled')
+        global_vars.instance().set_value("timer_mode", "True")
+        global_vars.instance().set_value("auto_mode", "False")
+    else:
+        logger.info('Timer Mode Disabled')
+        global_vars.instance().set_value("timer_mode", "False")
+    save_config()
+
+@socketio.on('timer_times')
+def handle_timer_times(data):
+    timer_open_time = data.get('timer_open_time', data.get('open_time'))
+    timer_close_time = data.get('timer_close_time', data.get('close_time'))
+    if timer_open_time is not None and timer_close_time is not None:
+        global_vars.instance().set_values({"timer_open_time": timer_open_time, "timer_close_time": timer_close_time})
+        save_config()
 
 @socketio.on('auto_offsets')
 def handle_input_numbers(data):
@@ -939,6 +974,8 @@ def index():
         auto_mode=global_vars.instance().get_value("auto_mode"),
         sunrise_offset=global_vars.instance().get_value("sunrise_offset"),
         sunset_offset=global_vars.instance().get_value("sunset_offset"),
+        timer_open_time=global_vars.instance().get_value("timer_open_time"),
+        timer_close_time=global_vars.instance().get_value("timer_close_time"),
         location=global_vars.instance().get_value("location"),
         valid_locations=get_valid_locations(),
         reference_door_endstops_ms=global_vars.instance().get_value("reference_door_endstops_ms"),

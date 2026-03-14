@@ -16,7 +16,7 @@ No application logic has been modified; only the *structure* changed.
 
 import time
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from protected_dict import protected_dict as global_vars
 
@@ -174,16 +174,22 @@ class DoorTaskRunner:
             _now = time.time()
             _dt = (_now - self._last_step_time) if self._last_step_time is not None else 0.0
             self._last_step_time = _now
-            d_door_state, auto_mode, reference_door_endstops_ms = (
+            d_door_state, auto_mode, reference_door_endstops_ms, timer_mode, timer_open_time, timer_close_time = (
                 global_vars.instance().get_values(
-                    ["desired_door_state", "auto_mode", "reference_door_endstops_ms"]
+                    ["desired_door_state", "auto_mode", "reference_door_endstops_ms", "timer_mode", "timer_open_time", "timer_close_time"]
                 )
             )
 
             auto_mode = auto_mode == "True"
-            door.set_auto_mode(auto_mode)
+            timer_mode = timer_mode == "True"
+            door.set_auto_mode(auto_mode or timer_mode)
 
             if d_door_state != self.last_d_door_state:
+                if self.last_d_door_state is not None:
+                    if auto_mode and not self.door_override:
+                        logger.info(f"[Auto Mode] System changing desired door state from {self.last_d_door_state.upper()} to {d_door_state.upper()}.")
+                    elif timer_mode and not self.door_override:
+                        logger.info(f"[Timer Mode] System changing desired door state from {self.last_d_door_state.upper()} to {d_door_state.upper()}.")
                 self.door_move_count = 0
                 self.last_d_door_state = d_door_state
 
@@ -260,6 +266,79 @@ class DoorTaskRunner:
                             "during movement window."
                         )
                         self.sentOverrideNotification = True
+
+            # Timer Mode logic
+            elif timer_mode and not self.door_override:
+                if reference_door_endstops_ms is None:
+                    logger.warning(
+                        "Reference door endstops not set. Please run the reference "
+                        "door endstops sequence from the WebUI - disabling timer mode."
+                    )
+                    global_vars.instance().set_value("timer_mode", "False")
+                else:
+                    current_time = self._get_current_time()
+                    try:
+                        open_dt = datetime.strptime(timer_open_time, "%H:%M").time()
+                        close_dt = datetime.strptime(timer_close_time, "%H:%M").time()
+                        open_time = datetime.combine(current_time.date(), open_dt)
+                        open_time = current_time.tzinfo.localize(open_time) if current_time.tzinfo else open_time
+                        
+                        close_time = datetime.combine(current_time.date(), close_dt)
+                        close_time = current_time.tzinfo.localize(close_time) if current_time.tzinfo else close_time
+                    except Exception as e:
+                        logger.error(f"Error parsing timer times: {e}")
+                        open_time = current_time
+                        close_time = current_time
+                    
+                    time_window = timedelta(minutes=1)
+
+                    if self.first_iter and not self.auto_close_retry_pending:
+                        if current_time >= open_time and current_time < close_time:
+                            global_vars.instance().set_value("desired_door_state", "open")
+                        else:
+                            global_vars.instance().set_value("desired_door_state", "closed")
+
+                    if current_time >= open_time and current_time <= open_time + time_window:
+                        global_vars.instance().set_value("desired_door_state", "open")
+
+                    if (
+                        current_time >= close_time
+                        and current_time <= close_time + time_window
+                        and not self.auto_close_retry_pending
+                    ):
+                        global_vars.instance().set_value("desired_door_state", "closed")
+
+            elif timer_mode and self.door_override:
+                current_time = self._get_current_time()
+                try:
+                    open_dt = datetime.strptime(timer_open_time, "%H:%M").time()
+                    close_dt = datetime.strptime(timer_close_time, "%H:%M").time()
+                    open_time = datetime.combine(current_time.date(), open_dt)
+                    open_time = current_time.tzinfo.localize(open_time) if current_time.tzinfo else open_time
+                    
+                    close_time = datetime.combine(current_time.date(), close_dt)
+                    close_time = current_time.tzinfo.localize(close_time) if current_time.tzinfo else close_time
+                except:
+                    open_time = current_time
+                    close_time = current_time
+
+                time_window = timedelta(minutes=1)
+                window_active = (
+                    self.first_iter
+                    or (current_time >= open_time and current_time <= open_time + time_window)
+                    or (current_time >= close_time and current_time <= close_time + time_window)
+                )
+                if window_active and not self.sentOverrideNotification:
+                    self._send_notification(
+                        "Manual Override Active",
+                        "Timer-mode wants to move the door, "
+                        "but the manual override switch is active.",
+                    )
+                    logger.warning(
+                        "Timer-mode door command blocked by manual override "
+                        "during movement window."
+                    )
+                    self.sentOverrideNotification = True
 
             # Poll endstops every iteration as a reliable safety-net.
             # Edge-detect callbacks can be missed (bounce, gevent blocking,
@@ -393,7 +472,7 @@ class DoorTaskRunner:
                 self.last_d_door_state = "closed"
 
             # Reset retry state whenever we leave auto mode or enter override.
-            if not auto_mode or self.door_override:
+            if not (auto_mode or timer_mode) or self.door_override:
                 self.auto_close_premature_count = 0
                 self.auto_close_retry_pending = False
                 self.auto_close_retry_time = None
