@@ -1314,21 +1314,25 @@ def api_set_system_time():
 
     new_time = data['time']
     try:
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"[System Time] Time update requested via web UI. Device current time: {current_time}, Target new time: {new_time}")
+        
         # Validate format (Expected: YYYY-MM-DD HH:MM:SS)
         datetime.strptime(new_time, '%Y-%m-%d %H:%M:%S')
-        
+
         if os.name != 'nt':
             result = subprocess.run(['sudo', 'date', '-s', new_time], capture_output=True, text=True)
             if result.returncode == 0:
-                logger.info(f"System time set to {new_time}")
+                logger.info(f"[System Time] Successfully synchronized Raspberry Pi system time to {new_time}")
                 return jsonify({'message': 'System time successfully updated.'})
             else:
-                logger.error(f"Failed to set system time: {result.stderr}")
+                logger.error(f"[System Time] Failed to set system time via hwclock/date: {result.stderr}")
                 return jsonify({'error': f"Failed to set system time: {result.stderr}"}), 500
         else:
-            logger.warning(f"[Mock] Setting system time on Windows: {new_time}")
+            logger.warning(f"[System Time] [Mock Window] Would have updated OS time from {current_time} to {new_time}")
             return jsonify({'message': 'System time mock updated successfully (Windows)'})
     except ValueError:
+        logger.warning(f"[System Time] Invalid date format provided: {new_time}")
         return jsonify({'error': "Invalid date format. Required: YYYY-MM-DD HH:MM:SS"}), 400
     except Exception as e:
         logger.error(f"Exception setting system time: {e}")
