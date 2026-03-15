@@ -8,11 +8,26 @@ logger = logging.getLogger(__name__)
 if os.name == "nt":
     from mock_gpio import MockGPIO as GPIO
 else:
+    use_mock_hardware = False
     try:
-        import RPi.GPIO as GPIO
-    except Exception as e:
-        logger.error(f"Failed to initialize RPi.GPIO ({e}). Falling back to MockGPIO.")
+        import ruamel.yaml as YAML
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"), 'r') as _f:
+            _yaml = YAML.YAML(typ='safe')
+            _config = _yaml.load(_f.read())
+            if _config and type(_config) is dict:
+                use_mock_hardware = _config.get("use_mock_hardware", False)
+    except Exception:
+        pass
+
+    if use_mock_hardware:
+        logger.info("use_mock_hardware is set, using MockGPIO for door.py.")
         from mock_gpio import MockGPIO as GPIO
+    else:
+        try:
+            import RPi.GPIO as GPIO
+        except Exception as e:
+            logger.error(f"Failed to initialize RPi.GPIO ({e}). Falling back to MockGPIO.")
+            from mock_gpio import MockGPIO as GPIO
 
 GPIO.setwarnings(False)
 import time

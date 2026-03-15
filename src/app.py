@@ -35,7 +35,6 @@ import logging
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 import glob
 import sys
-from camera import Camera
 import base64
 from pywebpush import webpush, WebPushException
 import atexit
@@ -51,25 +50,38 @@ if os.name != 'nt':
 
 logger = logging.getLogger(__name__)
 
-if os.name != 'nt':
+use_mock_hardware = False
+try:
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"), 'r') as _f:
+        _yaml = YAML.YAML(typ='safe')
+        _config = _yaml.load(_f.read())
+        if _config and type(_config) is dict:
+            use_mock_hardware = _config.get("use_mock_hardware", False)
+except Exception:
+    pass
+
+if os.name != 'nt' and not use_mock_hardware:
     try:
         from gpiozero import CPUTemperature
         import board
         from dht22 import DHT22
         from dht11 import DHT11
+        from camera import Camera
     except Exception as e:
         logger.error(f"Hardware initialization failed: {e}. Falling back to mock hardware.")
         from MockDHT22 import MockDHT22 as DHT22
         from MockDHT11 import MockDHT11 as DHT11
         from mock_board import MockBoard
         from mock_temperatur import MockCPUTemperature as CPUTemperature
+        from mock_camera import MockCamera as Camera
         board = MockBoard()
 else:
-    logger.warning("Running on Windows, using mock classes.")
+    logger.warning("Running on Windows or use_mock_hardware is set, using mock classes.")
     from MockDHT22 import MockDHT22
     from MockDHT11 import MockDHT11
     from mock_board import MockBoard
     from mock_temperatur import MockCPUTemperature
+    from mock_camera import MockCamera as Camera
     CPUTemperature = MockCPUTemperature
     DHT22 = MockDHT22
     DHT11 = MockDHT11
@@ -248,6 +260,7 @@ def save_config():
         with open(config_filename, 'w') as file:
             yaml = YAML.YAML()
             to_dump = {
+                "use_mock_hardware": global_vars.instance().get_value("use_mock_hardware"),
                 "auto_mode": global_vars.instance().get_value("auto_mode"),
                 "timer_mode": global_vars.instance().get_value("timer_mode"),
                 "timer_open_time": global_vars.instance().get_value("timer_open_time"),
@@ -269,6 +282,7 @@ def load_config():
     saveNewConfig = False
     with config_lock:
         config_to_set = {
+            "use_mock_hardware": False,
             "auto_mode": "True",
             "timer_mode": "False",
             "timer_open_time": "07:00",
