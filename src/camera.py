@@ -1,20 +1,29 @@
-import cv2
 import time
 import logging
 
 logger = logging.getLogger(__name__)
 class Camera:
+
+    is_init = False
+
     def __init__(self, device_index=0):
-        self.device_index = device_index
-        self.camera = cv2.VideoCapture(device_index)
-        if not self.camera.isOpened():
-            raise RuntimeError(f"Unable to open video device {device_index}")
-    
+        try:
+            import cv2
+            self.device_index = device_index
+            self.camera = cv2.VideoCapture(device_index)
+            if not self.camera.isOpened():
+                raise RuntimeError(f"Unable to open video device {device_index}")
+            self.is_init = True
+        except ImportError:
+            raise RuntimeError("OpenCV (cv2) is required for Camera functionality. Please install it with 'pip install opencv-python'.")
+
     def __del__(self):
-        if self.camera.isOpened():
+        if self.is_init and self.camera.isOpened():
             self.camera.release()
     
     def get_frame(self):
+        if not self.is_init:
+            return None
         success, frame = self.camera.read()
         if not success:
             raise RuntimeError("Failed to capture frame from camera.")
