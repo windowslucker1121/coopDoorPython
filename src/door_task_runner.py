@@ -367,7 +367,7 @@ class DoorTaskRunner:
             # Three consecutive false triggers → error state.
             # ------------------------------------------------------------------
             if (
-                auto_mode
+                (auto_mode or timer_mode)
                 and not self.door_override
                 and (self.was_door_closing or self._close_retry_just_fired)
                 and door_state == "closed"
