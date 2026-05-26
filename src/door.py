@@ -222,7 +222,13 @@ class DOOR():
         to contact bounce."""
         if self.reference_door_active:
             return
-
+        # In ErrorState the motor is already off and the door is frozen at
+        # whatever position it reached.  Acting on an endstop edge here would
+        # flip self.state (e.g. "stopped" -> "open") and fight the task-loop
+        # logic, producing infinite log spam until the operator clears the
+        # error.  Just ignore edges while in error.
+        if self.errorState:
+            return
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH
         compareValueLower = GPIO.LOW if invert_end_down else GPIO.HIGH
 
@@ -252,6 +258,16 @@ class DOOR():
         as a reliable safety-net independent of edge-detect callbacks.
         Returns True if an endstop is currently triggered."""
         if self.reference_door_active:
+            return False
+
+        # While in ErrorState the motor is already stopped and self.state
+        # must remain frozen (typically "stopped").  If we still flipped
+        # self.state to "open"/"closed" here, the door_task drive block
+        # would see a mismatch with desired_door_state and call stop()
+        # again on every iteration, producing endless log spam.  See the
+        # log-spam regression where the door was physically stuck at the
+        # upper endstop after "Endstop not reached".
+        if self.errorState:
             return False
 
         compareValueUpper = GPIO.LOW if invert_end_up else GPIO.HIGH

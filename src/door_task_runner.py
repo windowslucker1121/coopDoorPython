@@ -184,6 +184,53 @@ class DoorTaskRunner:
             timer_mode = timer_mode == "True"
             door.set_auto_mode(auto_mode or timer_mode)
 
+            # ------------------------------------------------------------------
+            # ErrorState short-circuit.
+            #
+            # When the door is in an error state the motor is already off and
+            # must stay off until the operator clears the error.  Letting the
+            # auto/timer mode blocks rewrite ``desired_door_state`` every
+            # iteration (e.g. "closed" during the 1-minute close-window) and
+            # then running the drive block causes a tight oscillation:
+            #   * timer mode -> desired_door_state = "closed"
+            #   * drive block sees mismatch -> door.stop() (logs)
+            #   * next iter: same thing, every 0.5 s, forever.
+            #
+            # So when in ErrorState we: send the one-time notification, reset
+            # all retry/movement bookkeeping, commit state, and bail out of
+            # this iteration before any mode block or drive block runs.
+            # check_endstops() / endstop_hit() are also guarded inside DOOR.
+            if door.ErrorState():
+                if not self.sentErrorNotification:
+                    self._send_notification(
+                        "Door Error",
+                        "The door is in an error state, please check the door.",
+                    )
+                    self.sentErrorNotification = True
+                # Drop any in-flight movement bookkeeping; it's meaningless
+                # while the motor is locked out and would otherwise leak into
+                # the next close cycle after the operator clears the error.
+                self.door_move_count = 0
+                self.auto_close_premature_count = 0
+                self.auto_close_retry_pending = False
+                self.auto_close_retry_time = None
+                self._close_retry_just_fired = False
+                self.auto_close_cumulative_drive_s = 0.0
+                self.was_door_closing = False
+                self.first_iter = False
+                # Commit current door state to global_vars so the UI stays
+                # accurate even while we're locked out.
+                global_vars.instance().set_values(
+                    {
+                        "state": self.door_state,
+                        "override": self.door_override,
+                        "sunrise": self.sunrise,
+                        "sunset": self.sunset,
+                        "error_state": door.errorState,
+                    }
+                )
+                return True
+
             if d_door_state != self.last_d_door_state:
                 if self.last_d_door_state is not None:
                     if auto_mode and not self.door_override:
