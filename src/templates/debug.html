@@ -213,6 +213,9 @@
             {% if is_windows %}
             <a href="/mock">🧪 Mock</a>
             {% endif %}
+            {% if not is_windows %}
+            <button id="btnRestart" onclick="restartApp()" style="background:var(--low);color:#fff;border-color:var(--low);">🔄 Restart</button>
+            {% endif %}
             <button id="toggleTheme">🌙 Dark Mode</button>
         </div>
     </div>
@@ -723,6 +726,32 @@
         loadGpioConfig();
         loadWifiConfig();
         loadNetworkStatus();
+
+        // ── Restart ─────────────────────────────────
+        function restartApp() {
+            if (!confirm('Restart the DEVICE now?\nThe page will become temporarily unavailable.')) return;
+            const btn = document.getElementById('btnRestart');
+            btn.disabled = true;
+            btn.textContent = '⏳ Rebooting';
+            fetch('/api/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'restarting') {
+                        btn.textContent = '✔ Rebooting...';
+                        // Poll until the server comes back up
+                        setTimeout(function poll() {
+                            fetch('/').then(() => { location.reload(); }).catch(() => setTimeout(poll, 2000));
+                        }, 3000);
+                    } else {
+                        btn.textContent = '✖ ' + (data.error || 'Failed');
+                        setTimeout(() => { btn.disabled = false; btn.textContent = '🔄 Reboot'; }, 4000);
+                    }
+                })
+                .catch(e => {
+                    btn.textContent = '✖ Error';
+                    setTimeout(() => { btn.disabled = false; btn.textContent = '🔄 Reboot'; }, 4000);
+                });
+        }
     </script>
 </body>
 </html>

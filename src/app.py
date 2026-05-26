@@ -1422,6 +1422,29 @@ def api_wifi_connect():
     return jsonify({'success': success})
 
 
+@app.route('/api/restart', methods=['POST'])
+def restart_app():
+    if os.name == 'nt':
+        return jsonify({'error': 'Restart is not supported on Windows.'}), 400
+
+    logger.info("Device reboot requested via debug panel.")
+
+    def do_reboot():
+        time.sleep(1)
+        try:
+            os.sync()
+        except Exception:
+            pass
+
+        subprocess.Popen(
+            ['sudo', 'systemctl', 'reboot'],
+            preexec_fn=os.setpgrp
+        )
+
+    Thread(target=do_reboot, daemon=True).start()
+    return jsonify({'status': 'rebooting device'})
+
+
 @app.route('/update', methods=['POST'])
 def update_app():
     import subprocess
