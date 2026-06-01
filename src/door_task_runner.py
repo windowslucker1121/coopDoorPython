@@ -42,7 +42,7 @@ class DoorTaskRunner:
         touching the network.
     """
 
-    DOOR_MOVE_MAX_AFTER_ENDSTOPS = 15
+    DOOR_MOVE_MAX_AFTER_ENDSTOPS = 20
     PREMATURE_CLOSE_THRESHOLD = 0.8  # require ≥80 % of reference travel time
 
     def __init__(self, door, get_sunrise_sunset, get_current_time, send_notification):
