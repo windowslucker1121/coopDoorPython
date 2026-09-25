@@ -1,9 +1,10 @@
-# Dinky Coop — Backend Overview (v2)
+# Dinky Coop — Overview (v2)
 
 Raspberry Pi controller for a chicken-coop door with a web dashboard. This
-document describes the architecture of the rewritten backend (`src/coop/`).
-The frontend (`src/templates/`, `src/static/`, `src/sw.js`) was not changed:
-the backend keeps every route, Socket.IO event and payload field it uses.
+document describes the architecture of the backend (`src/coop/`) and the
+single-page web app (`src/templates/app.html`, `src/static/app/`,
+`src/sw.js`). The design brief and the list of every UI function are in
+`docs/design/FEATURES.md`.
 
 ---
 
@@ -141,6 +142,7 @@ Workers (greenlets):
 ```yaml
 use_mock_hardware: false     # true → mock GPIO, simulated sensors
 simulate_door: true          # with mock hardware: simulate the physical door
+simulator_travel_s: 8        # simulated door travel time (1-120 s)
 auto_mode: true              # auto_mode / timer_mode → Mode
 timer_mode: false
 timer_open_time: '07:00'
@@ -228,20 +230,20 @@ immutable `status`. One `step()`:
 
 ---
 
-## 6. External interfaces (unchanged contract)
+## 6. External interfaces
 
 **HTTP:**
 
 | Group | Routes |
 |---|---|
-| Pages and assets | `/`, `/debug`, `/mock` (mock hardware only), `/favicon.ico`, `/manifest.json`, `/sw.js`, `/static/*` |
+| Pages and assets | `/` (the app), `/debug` and `/mock` (redirect to `/#/hardware`; `/mock` is 403 on real hardware), `/favicon.ico`, `/manifest.json`, `/sw.js`, `/static/*` |
 | Push and version | `/version`, `POST /subscribe` |
 | Log and data viewers | `/api/logs[/<f>]`, `/api/csv[/<f>]` |
 | Configuration | `/api/gpio-config` (GET/POST), `/api/wifi-config` (GET/POST; passwords are masked as `********`, which is ignored on save) |
 | Wi-Fi | `/api/wifi-status`, `/api/wifi-scan`, `POST /api/wifi-ap`, `POST /api/wifi-connect` |
 | System | `POST /api/system/time`, `POST /api/restart`, `POST /update` |
 | Captive-portal probes | `/generate_204`, `/gen_204`, `/hotspot-detect.html`, `/success.html` |
-| New | `GET /api/status` (dashboard payload), `GET /api/health` (worker liveness, 503 if a worker died) |
+| Status | `GET /api/status` (dashboard payload), `GET /api/health` (worker liveness, 503 if a worker died), `GET /api/settings` (mode, offsets, timer, location, flags - no secrets), `GET /api/locations` (city list for the location search) |
 
 `/api/*` responses are never cached.
 
@@ -250,13 +252,21 @@ immutable `status`. One `step()`:
 | Direction | Events |
 |---|---|
 | Client → server: door | `open`, `close` and `stop` (each switches to manual mode, saved), `reference_endstops`, `clear_error`, `generate_error` |
-| Client → server: settings (validated, saved) | `toggle`, `toggle_timer`, `timer_times`, `auto_offsets`, `update_location` |
+| Client → server: settings (validated, saved) | `set_mode {mode}`, `toggle`, `toggle_timer`, `timer_times`, `auto_offsets`, `update_location` |
 | Client → server: data requests (answered to the requesting client) | `get_csv_data`, `get_debug_data`, `mock_trigger_pin`, `mock_get_outputs` |
 | Server → client | `data` (every 1 s), `log`, `camera`, `csv_data`, `debug_data`, `mock_update_outputs` |
 
+Every command and settings event answers with an acknowledgement
+`{"ok": true}` or `{"ok": false, "error": "…"}`; the app shows the error
+text. Sun and Timer mode are refused until the door is calibrated.
+
 The dashboard payload (`web/payloads.py`) keeps every original key and
-format: temperatures as `"21.5°C"`, `auto_mode`/`timer_mode` as
-`"True"`/`"False"`, and so on.
+format (temperatures as `"21.5°C"`, `auto_mode`/`timer_mode` as
+`"True"`/`"False"`, …) and adds typed fields for the app: `mode`,
+`open_time`/`close_time`, `door_desired`, `override_active`,
+`retry_pending`/`retry_count`/`retry_max`, `reference_running`,
+`hardware_mock` and `events` (the controller's last 12 door events, newest
+first: `{ts, time, kind, text}`, e.g. "Door opened by the sun schedule").
 
 **Security:**
 * **HTTP Basic auth** is optional; enable it with
@@ -270,11 +280,35 @@ format: temperatures as `"21.5°C"`, `auto_mode`/`timer_mode` as
 
 ---
 
-## 7. Development
+## 7. Web app
+
+A dependency-free single-page app (no build step): `templates/app.html` is
+the shell, `static/app/app.css` the Slate & Amber design (light and dark
+tokens, self-hosted Bricolage Grotesque + Figtree), `static/app/app.js` the
+code. Chart.js and the Socket.IO client are vendored in `static/js/`.
+
+* **Layout:** sidebar (Coop / Setup / Device) on wide screens; below 1024 px
+  a bottom tab bar (Home, Climate, History, More). Hash routes
+  (`#/schedule`, …) so every page can be bookmarked.
+* **Pages** are objects with `render()`, `enter(root)`, `leave()` and
+  `update(data, root)`. Each visit renders into a fresh container, so work
+  that finishes after the user moved on only touches a detached node.
+* **Live data** arrives on the `data` event every second; commands use
+  Socket.IO acknowledgements, settings with REST endpoints use `fetch`.
+* **Banners** (fault, calibrate, calibrating, switch override, blocked
+  door, clock mismatch, offline) appear on every page with a fixing action.
+* **Service worker:** network-first for the page with the cached shell or
+  `offline.html` as fallback, stale-while-revalidate for `/static`, never
+  caches `/api` or Socket.IO; also shows push notifications.
+
+---
+
+## 8. Development
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                   # 412 tests, ~9 s
+pytest -m "not e2e"                      # 452 unit tests, ~6 s
+pytest tests/e2e                         # 41 browser tests, ~90 s (Playwright + Chromium)
 pytest --cov=src                         # ≈92 % (coop package ≈95 %)
 echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app with door simulator
 ```
@@ -290,6 +324,9 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
 | `test_wifi.py` | nmcli parsing, AP detection, actions, watchdog |
 | `test_web_http.py` / `test_web_sockets.py` / `test_payloads.py` | The complete frontend contract, auth, captive portal |
 | `test_application.py` | Wiring, workers, camera, CLI, and an **end-to-end day** on the simulator with a fake clock |
+| `test_door_events.py` | The controller's event feed and how events are attributed (manual, switch, sun, timer) |
+| `e2e/test_e2e_door.py` | In a real browser against the real server: navigation, door commands, calibration, modes, fault / override / clock / offline banners, simulator panel |
+| `e2e/test_e2e_pages.py` | Every settings form (valid and invalid input), charts, camera, network, pins, logs filters, system actions, theme, service worker, phone layout, dark mode |
 
 **Extending:**
 * New sensor: subclass `TemperatureSensor` and select it in `build_hardware`.
@@ -299,7 +336,7 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
 
 ---
 
-## 8. Changes compared to v1
+## 9. Changes compared to v1
 
 * **Structure:**
   * The 1,700-line `app.py`, the `protected_dict` global store and the
@@ -324,6 +361,11 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
   * Wi-Fi passwords are masked.
   * New: optional Basic auth, `/api/status`, `/api/health`, and the
     `python -m coop` CLI.
+* **Web app:** the five v1 templates (dashboard, door page, debug and mock
+  panels) are replaced by one single-page app with every function in one
+  place, light and dark themes, a phone layout, human-readable error help
+  and a guided first calibration. Sun and Timer mode now require a
+  calibrated door.
 * **Operations:**
   * Mock mode works on any OS (v1: Windows only) and includes a physical door
     simulator.

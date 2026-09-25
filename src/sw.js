@@ -1,133 +1,109 @@
-const CACHE_NAME = 'static-cache-v1';
-const DYNAMIC_CACHE_NAME = 'dynamic-cache-v1';
+// Dinky Coop service worker: offline shell + web push.
+const CACHE = 'coop-shell-v2';
 
-// List of URLs to cache during the install event
-// index.html is cached by default
-const STATIC_ASSETS = [
-  '/',
+const SHELL = [
   '/manifest.json',
-  '/static/offline.html', 
-  '/static/waiting.png',
+  '/static/offline.html',
+  '/static/app/app.css',
+  '/static/app/app.js',
+  '/static/js/socket.io.js',
+  '/static/js/chart.umd.js',
+  '/static/fonts/figtree.woff2',
+  '/static/fonts/bricolage-grotesque.woff2',
+  '/static/favicon.svg',
   '/static/icons/icon_144x144.png',
   '/static/icons/icon_192x192.png',
-  '/static/icons/icon_512x512.png',
 ];
 
-
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing...');
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Caching static assets');
-      return cache.addAll(STATIC_ASSETS).catch((error) => {
-        console.error(`[Service Worker] Error caching static assets:`, error);
-      });
-    })
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .catch((err) => console.warn('[sw] precache failed', err))
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activating new service worker...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME && cache !== DYNAMIC_CACHE_NAME) {
-            console.log('[Service Worker] Removing old cache:', cache);
-            return caches.delete(cache);
-          }
-        })
-      );
-    })
+    caches.keys()
+      .then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
+      .then(() => self.clients.claim())
   );
-  return self.clients.claim();
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'skipWaiting') {
-    console.log('[Service Worker] Skipping waiting...');
-    self.skipWaiting();
-  }
+  if (event.data === 'skipWaiting') self.skipWaiting();
 });
 
-// Fetch event
 self.addEventListener('fetch', (event) => {
-  if (event.request.method === 'GET') {
-    if (new URL(event.request.url).pathname.startsWith('/api/')) {
-      event.respondWith(fetch(event.request));
-      return;
-    }
-    if (event.request.mode === 'navigate') {
-      event.respondWith(
-        fetch(event.request)
-          .then((response) => {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clone);
-            });
-            return response;
-          })
-          .catch(() => {
-            return caches.match(event.request).then((cachedResponse) => {
-              return cachedResponse || caches.match('/static/offline.html');
-            });
-          })
-      );
-    } else {
-      event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-          return (
-            cachedResponse ||
-            fetch(event.request)
-              .then((response) => {
-                if (response && response.ok) {
-                  const clone = response.clone();
-                  caches.open(DYNAMIC_CACHE_NAME).then((cache) => {
-                    cache.put(event.request, clone);
-                  });
-                }
-                return response;
-              })
-              .catch((error) => {
-                console.error('[Service Worker] Fetch failed:', error);
-                return null;
-              })
-          );
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Live data never comes from the cache.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io') ||
+      url.pathname.startsWith('/video_feed') || url.pathname.startsWith('/camera')) {
+    return;
+  }
+
+  // Pages: network first, cached copy (or the offline page) when unreachable.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('/', copy));
+          }
+          return res;
         })
-      );
-    }
-  } else {
-    // Allow non-GET requests to bypass the cache
-    event.respondWith(fetch(event.request));
+        .catch(() => caches.match('/').then((hit) => hit || caches.match('/static/offline.html')))
+    );
+    return;
+  }
+
+  // Static assets: stale-while-revalidate.
+  if (url.pathname.startsWith('/static/') || url.pathname === '/manifest.json') {
+    event.respondWith(
+      caches.open(CACHE).then((cache) =>
+        cache.match(req).then((hit) => {
+          const network = fetch(req)
+            .then((res) => {
+              if (res.ok) cache.put(req, res.clone());
+              return res;
+            })
+            .catch(() => hit);
+          return hit || network;
+        })
+      )
+    );
   }
 });
 
-
-// sw.js
 self.addEventListener('push', (event) => {
-  console.log('[Service Worker] Push received.');
-
-  const data = event.data ? event.data.json() : {};
-  const title = data.title || 'Default Title';
-  const options = {
-    body: data.body || 'Default body text',
-    icon: '/static/icons/icon_192x192.png',
-    badge: '/static/icons/icon_144x144.png',
-    data: data.url || '/', // Link when the notification is clicked
-  };
-
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data && event.data.text() }; }
   event.waitUntil(
-    self.registration.showNotification(title, options)
+    self.registration.showNotification(data.title || 'Dinky Coop', {
+      body: data.body || '',
+      icon: '/static/icons/icon_192x192.png',
+      badge: '/static/icons/icon_144x144.png',
+      data: data.url || '/',
+    })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
-  console.log('[Service Worker] Notification click Received.');
-
   event.notification.close();
-
+  const target = event.notification.data || '/';
   event.waitUntil(
-    clients.openWindow(event.notification.data)
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) { c.navigate(target); return c.focus(); }
+      }
+      return clients.openWindow(target);
+    })
   );
 });

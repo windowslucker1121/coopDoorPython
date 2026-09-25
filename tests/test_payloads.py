@@ -14,6 +14,8 @@ DASHBOARD_KEYS = [
     "reference_door_endstops_ms", "auto_mode", "errorstate", "camera_enabled",
     "cpu_percent", "ram_used_mb", "ram_total_mb", "ram_percent", "disk_used_gb", "disk_total_gb", "disk_percent",
     "python_version", "timer_mode", "timer_open_time", "timer_close_time",
+    "mode", "open_time", "close_time", "door_desired", "override_active", "retry_pending", "retry_count",
+    "retry_max", "reference_running", "hardware_mock", "events",
 ]
 
 

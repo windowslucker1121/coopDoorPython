@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,12 +54,25 @@ _BLACK_JPEG = bytes.fromhex(
 )
 
 
+_MOCK_FRAME_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_frame.jpg")
+
+
+def _mock_frame() -> bytes:
+    """A static test picture of a coop (falls back to a black pixel)."""
+    try:
+        with open(_MOCK_FRAME_PATH, "rb") as f:
+            return f.read()
+    except OSError:
+        return _BLACK_JPEG
+
+
 class MockCamera:
     def __init__(self, device_index: int = 0):
         self.device_index = device_index
+        self._frame = _mock_frame()
 
     def get_frame(self) -> bytes:
-        return _BLACK_JPEG
+        return self._frame
 
     def close(self) -> None:
         pass

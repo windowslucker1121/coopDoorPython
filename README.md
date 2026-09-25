@@ -17,9 +17,29 @@ This is the [Raspberry Pi](https://www.raspberrypi.com) based controller softwar
 
 ## The Web App
 
-Below is the simple UI for the coop controller. It works well on a PC browser or phone.
+The web app shows the door, the climate in and around the coop, the camera and
+the history of the day. On a PC it has a sidebar; on a phone a tab bar. It
+follows the system's light or dark mode (or pick one under *System & updates*),
+and can be installed to the home screen as an app.
 
 ![`Coop App`](img/app.png "app.png")
+
+<img src="img/app-phone.png" alt="Coop App on a phone (dark mode)" width="300">
+
+| Page | What you can do there |
+|------|-----------------------|
+| **Home** | See and move the door (Open / Stop / Close), choose who decides (Manual, Sun, Timer), camera, temperatures, today's events |
+| **Climate** | Coop, outside and controller temperatures with today's chart |
+| **History** | Charts of any logged day with door open/closed bands, recent door events |
+| **Camera** | Live picture, fullscreen |
+| **Schedule & location** | Mode, sunrise/sunset offsets, fixed times, city search or coordinates |
+| **Network** | Wi-Fi status, scan, save and connect; fallback hotspot |
+| **Door & hardware** | Calibration, test error, live GPIO pins, pin configuration, door simulator (mock hardware) |
+| **Logs** | Search and filter the log files by level and component |
+| **System & updates** | Device health, clock, update, restart, theme, push notifications |
+
+Problems show up as banners on every page with a button that fixes them
+(calibrate, clear error, set the clock, …).
 
 ## How it is Wired Up
 
@@ -53,9 +73,10 @@ $ echo "use_mock_hardware: true" > config.yaml
 $ python3 src/app.py
 ```
 
-Open http://127.0.0.1:5000, run the reference sequence and watch the simulated
-door move. The mock panel (http://127.0.0.1:5000/mock) lets you toggle the
-endstops by hand.
+Open http://127.0.0.1:5000, press **Calibrate now** and watch the simulated
+door move. *Door & hardware* has a simulator panel to hold the manual switch
+and press the endstops by hand. `simulator_travel_s: 3` in `config.yaml`
+makes the simulated door faster.
 
 ### Command line
 
@@ -72,8 +93,14 @@ Run these from the `src/` directory:
 
 ```
 $ pip install -r requirements.txt -r requirements-dev.txt
-$ pytest
+$ pytest                  # unit tests + browser end-to-end tests
+$ pytest -m "not e2e"     # unit tests only (a few seconds)
 ```
+
+The end-to-end tests (`tests/e2e/`) start the real server on mock hardware
+and click through every page in headless Chromium. They need
+`playwright install chromium` once (or set `COOP_E2E_CHROMIUM` to a Chromium
+binary) and are skipped when Playwright is not installed.
 
 See [overview.md](overview.md) for the architecture of the `src/coop` package.
 

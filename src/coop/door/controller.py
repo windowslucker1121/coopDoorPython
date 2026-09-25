@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
@@ -94,6 +95,19 @@ class DoorController:
         self.position: float | None = None
         self._last_step: float | None = None
         self._status = DoorStatus()
+        # Recent door events (newest last) for the UI's "Today" / history lists.
+        self.events: deque[dict] = deque(maxlen=100)
+        self._published_state: DoorState | None = None
+        self._published_fault: str | None = None
+        self._calibrating = False
+
+    def recent_events(self, limit: int = 20) -> list[dict]:
+        return list(self.events)[-limit:][::-1]
+
+    def _event(self, kind: str, text: str) -> None:
+        now = self._clock.now()
+        self.events.append({"ts": now.isoformat(timespec="seconds"), "time": now.strftime("%H:%M"),
+                            "kind": kind, "text": text})
 
     # ── thread-safe API ──────────────────────────────────────────────
     @property
@@ -182,6 +196,8 @@ class DoorController:
             logger.exception("Sending notification failed")
 
     def _on_clear_error(self) -> None:
+        if self.driver.fault:
+            self._event("info", "Error cleared")
         self.driver.clear_fault()
         self._error_notified = False
         self._override_notified = False
@@ -197,7 +213,13 @@ class DoorController:
         self._was_closing = False
 
     def _run_reference(self) -> None:
-        travel_ms = self.driver.reference()
+        self._event("info", "Calibration started")
+        self._calibrating = True
+        self._publish(self._config.settings, self._clock.now())
+        try:
+            travel_ms = self.driver.reference()
+        finally:
+            self._calibrating = False
         if travel_ms is None:
             logger.critical("Referencing door endstops failed, please check the door and try again.")
             return
@@ -205,6 +227,7 @@ class DoorController:
             self._config.update(reference_travel_ms=travel_ms)
         except Exception as e:
             logger.error("Could not save the reference travel time: %s", e)
+        self._event("info", f"Calibrated: door travel {travel_ms / 1000:.1f} s")
         self.position = 1.0
         # The sequence ends at the top: stay there (auto/timer re-sync below
         # moves the door if the schedule wants it elsewhere).
@@ -322,6 +345,7 @@ class DoorController:
             return
         self.driver.stop()
         self.desired = DesiredState.STOPPED
+        self._event("warning", f"Close blocked - retry {self.premature_count}/{self.PREMATURE_CLOSE_MAX_RETRIES}")
         self.retry_at = mono + self.RETRY_DELAY_S
         self._retry_just_fired = False
         logger.info("Close retry scheduled in %.0f s (attempt %d/%d).", self.RETRY_DELAY_S,
@@ -387,7 +411,27 @@ class DoorController:
             self.position += delta if state is DoorState.OPENING else -delta
             self.position = max(0.0, min(1.0, self.position))
 
+    def _record_state_events(self, settings: Settings) -> None:
+        state, fault = self.driver.state, self.driver.fault
+        if fault and fault != self._published_fault:
+            self._event("error", f"Fault: {fault}")
+        self._published_fault = fault
+        if state is not self._published_state and self._published_state is not None:
+            if self.driver.override:
+                why = "by the switch"
+            else:
+                why = {Mode.AUTO: "by the sun schedule", Mode.TIMER: "by the timer",
+                       Mode.MANUAL: "manually"}[settings.mode]
+            if state is DoorState.OPEN:
+                self._event("open", f"Door opened {why}")
+            elif state is DoorState.CLOSED:
+                self._event("closed", f"Door closed {why}")
+            elif state is DoorState.STOPPED and self._published_state.moving and not fault:
+                self._event("info", "Door stopped")
+        self._published_state = state
+
     def _publish(self, settings: Settings, now: datetime) -> None:
+        self._record_state_events(settings)
         sunrise = sunset = open_time = close_time = None
         try:
             times = self._sun().sun_times(now.date())
@@ -414,7 +458,7 @@ class DoorController:
             sunset=sunset,
             open_time=open_time,
             close_time=close_time,
-            reference_running=self.driver.reference_active,
+            reference_running=self._calibrating or self.driver.reference_active,
             premature_close_count=self.premature_count,
             retry_pending=self.retry_pending,
         )

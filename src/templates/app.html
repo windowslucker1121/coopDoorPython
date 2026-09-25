@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dinky Coop</title>
+<meta name="theme-color" content="#1F3A5F" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F141A" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+<link rel="icon" href="{{ url_for('static', filename='favicon_32.png') }}" sizes="32x32">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon_192x192.png') }}">
+<script>
+  // Apply the saved theme before first paint (no flash).
+  try { var t = localStorage.getItem('coop-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ url_for('static', filename='app/app.css') }}">
+</head>
+<body>
+<a class="sr-only" href="#main">Skip to content</a>
+<div class="shell">
+  <aside class="sidebar" aria-label="Sidebar">
+    <a class="brand" href="#/" aria-label="Dinky Coop home">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21H3z"/><rect x="8.5" y="12" width="7" height="9"/></svg>
+      <span>Dinky Coop</span>
+    </a>
+    <nav class="nav" aria-label="Main" id="sidenav"></nav>
+    <div class="conn-card">
+      <span class="conn" data-state="reconnecting" data-conn><span class="dot"></span><span data-conn-text>Connecting…</span></span>
+      <span class="muted">Version <span data-bind="version">{{ version }}</span> · up <span data-bind="uptime_short">—</span></span>
+    </div>
+  </aside>
+
+  <div class="content">
+    <header class="topbar">
+      <h1 id="page-title">Home</h1>
+      <span class="date" id="today-label"></span>
+      <button class="icon-btn" type="button" id="theme-toggle" aria-label="Switch theme"></button>
+    </header>
+    <main id="main" tabindex="-1">
+      <div class="banners" id="banners" aria-live="polite"></div>
+      <div id="page"></div>
+    </main>
+  </div>
+</div>
+
+<nav class="tabbar" aria-label="Main" id="tabbar"></nav>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<dialog id="dialog"></dialog>
+
+<script>
+  window.COOP = { vapidPublicKey: {{ vapid_public_key | tojson }}, hardwareMock: {{ 'true' if hardware_mock else 'false' }} };
+</script>
+<script src="{{ url_for('static', filename='js/socket.io.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chart.umd.js') }}"></script>
+<script src="{{ url_for('static', filename='app/app.js') }}"></script>
+</body>
+</html>

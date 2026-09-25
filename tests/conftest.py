@@ -142,6 +142,7 @@ class FakeSystem:
         self.version_value = "abc1234"
         self.fail_time: Exception | None = None
         self.reboot_error: Exception | None = None
+        self.update_error: Exception | None = None
 
     def uptime(self) -> str:
         return "1 day(s), 2 hour(s), 3 minute(s), 4 second(s)"
@@ -168,6 +169,8 @@ class FakeSystem:
         self.actions.append(("reboot",))
 
     def start_update(self) -> None:
+        if self.update_error:
+            raise self.update_error
         self.actions.append(("update",))
 
 

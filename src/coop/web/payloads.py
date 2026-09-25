@@ -93,6 +93,18 @@ def dashboard_payload(app: "Application") -> dict:
         "timer_mode": _flag(s.mode is Mode.TIMER),
         "timer_open_time": s.timer_open_time,
         "timer_close_time": s.timer_close_time,
+        # additions for the v2 UI
+        "mode": s.mode.value,
+        "open_time": st.open_time.strftime("%H:%M") if st.open_time else "",
+        "close_time": st.close_time.strftime("%H:%M") if st.close_time else "",
+        "door_desired": st.desired.value,
+        "override_active": st.override,
+        "retry_pending": st.retry_pending,
+        "retry_count": st.premature_close_count,
+        "retry_max": app.controller.PREMATURE_CLOSE_MAX_RETRIES,
+        "reference_running": st.reference_running,
+        "hardware_mock": app.hardware.is_mock,
+        "events": app.controller.recent_events(12),
     })
     return data
 

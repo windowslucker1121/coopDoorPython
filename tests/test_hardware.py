@@ -282,6 +282,16 @@ class TestSimulator:
         sim.tick(4)
         assert sim.position == 0.0 and g.read(24) is True
 
+    def test_hand_toggled_endstop_is_kept_until_the_door_moves(self):
+        g = self.setup_gpio()
+        sim = DoorSimulator(g, GpioConfig(), travel_time_s=4, position=0.0)
+        g.trigger(23, True)  # web simulator panel: press the upper endstop
+        sim.tick(1)
+        assert g.read(23) is True
+        g.write(22, True)  # the door moves → the simulation owns the endstops again
+        sim.tick(1)
+        assert g.read(23) is False and g.read(24) is False
+
     def test_idle_motor_does_not_move(self):
         g = self.setup_gpio()
         sim = DoorSimulator(g, GpioConfig(), position=0.5)

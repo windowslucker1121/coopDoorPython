@@ -300,6 +300,7 @@ class AuthConfig:
 class Settings:
     use_mock_hardware: bool = False
     simulate_door: bool = True  # only used with mock hardware
+    simulator_travel_s: float = 8.0  # simulated door travel time
     mode: Mode = Mode.AUTO
     timer_open_time: str = "07:00"
     timer_close_time: str = "20:00"
@@ -341,6 +342,7 @@ class Settings:
         parse_int(self.camera_index, "camera_index", 0, 64)
         if self.reference_travel_ms is not None and not self.reference_travel_ms > 0:
             raise ConfigError("'reference_travel_ms' must be positive")
+        parse_float(self.simulator_travel_s, "simulator_travel_s", 1, 120)
         if self.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
             raise ConfigError("'log_level' must be DEBUG, INFO, WARNING or ERROR")
         for section in ("location", "gpio", "wifi"):
@@ -355,6 +357,7 @@ class Settings:
         data.update({
             "use_mock_hardware": self.use_mock_hardware,
             "simulate_door": self.simulate_door,
+            "simulator_travel_s": self.simulator_travel_s,
             "auto_mode": self.mode is Mode.AUTO,
             "timer_mode": self.mode is Mode.TIMER,
             "timer_open_time": self.timer_open_time,
@@ -381,7 +384,7 @@ class Settings:
         d = cls()
         raw = dict(raw or {})
         known = {
-            "use_mock_hardware", "simulate_door", "auto_mode", "timer_mode", "mode",
+            "use_mock_hardware", "simulate_door", "simulator_travel_s", "auto_mode", "timer_mode", "mode",
             "timer_open_time", "timer_close_time", "sunrise_offset", "sunset_offset",
             "location", "csvLog", "csv_log", "enable_camera", "camera_index",
             "outdoor_sensor_type", "gpio", "wifi", "auth", "reference_door_endstops_ms",
@@ -400,6 +403,7 @@ class Settings:
 
         take("use_mock_hardware", parse_bool)
         take("simulate_door", parse_bool)
+        take("simulator_travel_s", lambda v: parse_float(v, "simulator_travel_s", 1, 120))
         take("timer_open_time", lambda v: parse_hhmm(v, "timer_open_time"))
         take("timer_close_time", lambda v: parse_hhmm(v, "timer_close_time"))
         take("sunrise_offset", lambda v: parse_int(v, "sunrise_offset", -MAX_SUN_OFFSET_MIN, MAX_SUN_OFFSET_MIN))

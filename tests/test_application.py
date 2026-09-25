@@ -48,11 +48,21 @@ class TestWiring:
         assert app.controller.desired is DesiredState.OPEN
 
     def test_set_mode(self, app):
+        app.config.update(reference_travel_ms=8000.0)
         app.set_mode(Mode.TIMER, True)
         assert app.settings.mode is Mode.TIMER
         app.set_mode(Mode.AUTO, False)
         assert app.settings.mode is Mode.TIMER
         app.set_mode(Mode.TIMER, False)
+        assert app.settings.mode is Mode.MANUAL
+
+    def test_schedule_modes_need_a_reference(self, app):
+        app.config.update(mode=Mode.MANUAL)
+        with pytest.raises(ValueError, match="Calibrate"):
+            app.set_mode(Mode.AUTO, True)
+        assert app.settings.mode is Mode.MANUAL
+        app.set_mode(Mode.AUTO, False)   # switching off is always allowed
+        app.set_mode(Mode.MANUAL, True)
         assert app.settings.mode is Mode.MANUAL
 
 

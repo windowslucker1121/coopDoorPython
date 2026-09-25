@@ -34,30 +34,47 @@ def register_routes(flask_app: Flask, app: "Application") -> None:
     # ── pages ────────────────────────────────────────────────────────
     @flask_app.route("/")
     def index():
-        s = app.settings
         return render_template(
-            "grid_dashboard.html",
-            auto_mode="True" if s.auto_mode else "False",
-            sunrise_offset=s.sunrise_offset,
-            sunset_offset=s.sunset_offset,
-            timer_open_time=s.timer_open_time,
-            timer_close_time=s.timer_close_time,
-            location=s.location.to_dict(),
-            valid_locations=list_locations(),
-            reference_door_endstops_ms=s.reference_travel_ms,
+            "app.html",
             vapid_public_key=app.vapid_public_key or "",
-            is_windows=app.hardware.is_mock,
+            hardware_mock=app.hardware.is_mock,
+            version=app.system.version(),
         )
 
+    # Legacy pages now live inside the single-page app.
     @flask_app.route("/debug")
     def debug_panel():
-        return render_template("debug.html", is_windows=app.hardware.is_mock)
+        return redirect("/#/hardware", code=302)
 
     @flask_app.route("/mock")
     def mock_panel():
         if not app.hardware.is_mock:
-            return "Mock panel is only available with mock hardware.", 403
-        return render_template("mock.html")
+            return "The door simulator is only available with mock hardware.", 403
+        return redirect("/#/hardware", code=302)
+
+    @flask_app.route("/api/settings")
+    def api_settings():
+        s = app.settings
+        return jsonify({
+            "mode": s.mode.value,
+            "sunrise_offset": s.sunrise_offset,
+            "sunset_offset": s.sunset_offset,
+            "timer_open_time": s.timer_open_time,
+            "timer_close_time": s.timer_close_time,
+            "location": s.location.to_dict(),
+            "enable_camera": s.enable_camera,
+            "camera_index": s.camera_index,
+            "outdoor_sensor_type": s.outdoor_sensor_type.value,
+            "csv_log": s.csv_log,
+            "reference_travel_ms": s.reference_travel_ms,
+            "hardware_mock": app.hardware.is_mock,
+            "auth_enabled": s.auth.enabled,
+            "push_enabled": app.notifier.enabled,
+        })
+
+    @flask_app.route("/api/locations")
+    def api_locations():
+        return jsonify(list_locations())
 
     @flask_app.route("/favicon.ico")
     def favicon():
@@ -202,7 +219,13 @@ def register_routes(flask_app: Flask, app: "Application") -> None:
         ssid = data.get("ssid")
         if not ssid:
             return _error("SSID is required")
-        success = app.wifi.connect(str(ssid), data.get("password") or None)
+        password = data.get("password") or None
+        if password == MASK:
+            password = None
+        saved = app.settings.wifi
+        if password is None and str(ssid) == saved.ssid and saved.password:
+            password = saved.password   # "connect now" to the saved network
+        success = app.wifi.connect(str(ssid), password)
         if not success:
             logger.warning("Failed to connect to %s - starting AP mode in %.0f s to prevent lock-out.",
                            ssid, app.WIFI_FALLBACK_DELAY_S)
@@ -236,7 +259,10 @@ def register_routes(flask_app: Flask, app: "Application") -> None:
 
     @flask_app.route("/update", methods=["POST"])
     def update():
-        app.system.start_update()
+        try:
+            app.system.start_update()
+        except RuntimeError as e:
+            return _error(str(e))
         return jsonify({"status": "updating"})
 
     # ── captive-portal probes ────────────────────────────────────────
@@ -252,14 +278,6 @@ def register_routes(flask_app: Flask, app: "Application") -> None:
         return (f'<html><head><meta http-equiv="refresh" content="0;url={target}"></head>'
                 f'<body><p>Redirecting to portal... If nothing happens, '
                 f'<a href="{target}">click here</a>.</p></body></html>'), 200
-
-    @flask_app.template_filter("is_number")
-    def is_number(value):
-        try:
-            float(value)
-            return True
-        except (TypeError, ValueError):
-            return False
 
     @flask_app.after_request
     def no_cache_for_api(response):

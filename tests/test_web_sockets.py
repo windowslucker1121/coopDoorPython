@@ -1,4 +1,4 @@
-"""Socket.IO event contract (grid_dashboard.html, debug.html, mock.html)."""
+"""Socket.IO event contract (the single-page app)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def test_manual_commands_switch_to_persisted_manual_mode(app, sio, event, desire
 
 
 def test_toggles(app, sio):
-    app.config.update(mode=Mode.MANUAL)
+    app.config.update(mode=Mode.MANUAL, reference_travel_ms=8000.0)
     sio.emit("toggle", {"toggle": True})
     assert app.settings.mode is Mode.AUTO
     sio.emit("toggle_timer", {"toggle": True})
@@ -139,3 +139,49 @@ def test_mock_events_ignored_on_real_hardware(app, sio):
     sio.emit("mock_get_outputs")
     assert app.hardware.gpio.read(23) is False
     assert received(sio, "mock_update_outputs") == []
+
+
+# ── acknowledgements (the app shows the error text in a toast) ───────────────
+
+@pytest.mark.parametrize("event", ["open", "close", "stop", "reference_endstops", "clear_error", "generate_error"])
+def test_commands_acknowledge(sio, event):
+    assert sio.emit(event, callback=True) == {"ok": True}
+
+
+@pytest.mark.parametrize("mode", [Mode.AUTO, Mode.TIMER])
+def test_set_mode(app, sio, mode):
+    app.config.update(reference_travel_ms=8000.0)
+    assert sio.emit("set_mode", {"mode": mode.value}, callback=True) == {"ok": True}
+    assert app.settings.mode is mode
+    assert sio.emit("set_mode", {"mode": "manual"}, callback=True) == {"ok": True}
+    assert app.settings.mode is Mode.MANUAL
+    assert sio.emit("set_mode", {"mode": "manual"}, callback=True) == {"ok": True}
+
+
+def test_set_mode_needs_a_reference(app, sio):
+    app.config.update(mode=Mode.MANUAL)
+    ack = sio.emit("set_mode", {"mode": "auto"}, callback=True)
+    assert ack["ok"] is False and "Calibrate" in ack["error"]
+    assert app.settings.mode is Mode.MANUAL
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"mode": "party"}, "auto"])
+def test_set_mode_rejects_garbage(app, sio, payload):
+    ack = sio.emit("set_mode", payload, callback=True)
+    assert ack == {"ok": False, "error": "Unknown mode"}
+
+
+def test_toggle_acks(app, sio):
+    assert sio.emit("toggle", {"toggle": True}, callback=True)["ok"] is False
+    assert sio.emit("toggle", {}, callback=True) == {"ok": False, "error": "Invalid request"}
+
+
+def test_settings_acks(app, sio):
+    assert sio.emit("timer_times", {"open_time": "06:00", "close_time": "21:00"}, callback=True) == {"ok": True}
+    bad = sio.emit("timer_times", {"open_time": "25:00", "close_time": "21:00"}, callback=True)
+    assert bad["ok"] is False and bad["error"]
+    assert sio.emit("auto_offsets", {"sunrise_offset": 10, "sunset_offset": -5}, callback=True) == {"ok": True}
+    assert (app.settings.sunrise_offset, app.settings.sunset_offset) == (10, -5)
+    assert sio.emit("auto_offsets", {"sunrise_offset": 10}, callback=True)["ok"] is False
+    assert sio.emit("update_location", "nope", callback=True)["ok"] is False
+

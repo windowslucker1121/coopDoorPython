@@ -105,6 +105,8 @@ class SystemService:
 
     def start_update(self) -> None:
         """Launch the detached update helper, then exit this process."""
+        if not self._allow:
+            raise RuntimeError("Updating is not supported on this host (mock hardware)")
         logger.info("Update requested. Starting update helper...")
         service = self._systemd_service_name()
         cmd = [sys.executable, self._paths.update_script, self._paths.app_entrypoint, str(os.getpid())]

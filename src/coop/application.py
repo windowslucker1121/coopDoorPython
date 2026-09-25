@@ -68,13 +68,17 @@ class Application:
         self.wifi = wifi or WifiManager(mock=simulated_host)
         self.system = system or SystemService(self.paths, allow_system_changes=not simulated_host)
 
-        from .web.payloads import dashboard_payload  # local import: web depends on application
-        self.csv_logger = CsvDataLogger(self.paths.log_dir, lambda: dashboard_payload(self), self.clock.now)
+        self.csv_logger = CsvDataLogger(self.paths.log_dir, self._csv_row, self.clock.now)
 
         self.emit: Emit = lambda event, payload: None  # replaced by the web layer
         self._sim_last: float | None = None
         self.workers: list[Worker] = []
         self.config.subscribe(self._on_settings_changed)
+
+    def _csv_row(self) -> dict:
+        """Dashboard snapshot for the CSV log (scalar values only)."""
+        from .web.payloads import dashboard_payload
+        return {k: v for k, v in dashboard_payload(self).items() if not isinstance(v, (list, dict))}
 
     # ── accessors ────────────────────────────────────────────────────
     @property
@@ -94,8 +98,13 @@ class Application:
         self.controller.command(desired)
 
     def set_mode(self, mode: Mode, enabled: bool) -> None:
-        """Toggle auto / timer mode (switching one on switches the other off)."""
+        """Toggle auto / timer mode (switching one on switches the other off).
+
+        Raises ``ValueError`` when a schedule mode is enabled before the door
+        has been calibrated (the controller could not supervise it)."""
         current = self.settings.mode
+        if enabled and mode is not Mode.MANUAL and not self.settings.reference_travel_ms:
+            raise ValueError("Calibrate the door first - schedules need the measured travel time.")
         if enabled:
             new = mode
         else:

@@ -73,7 +73,8 @@ def build_hardware(settings: Settings, settings_provider: Callable[[], Settings]
         outdoor = (_outdoor_api(settings_provider)
                    if settings.outdoor_sensor_type is OutdoorSensorType.API
                    else RandomWalkSensor("mock-dht22", (5.0, 25.0), (40.0, 90.0)))
-        simulator = DoorSimulator(mock, settings.gpio) if settings.simulate_door else None
+        simulator = (DoorSimulator(mock, settings.gpio, travel_time_s=settings.simulator_travel_s)
+                     if settings.simulate_door else None)
         return Hardware(
             gpio=mock,
             indoor=RandomWalkSensor("mock-dht11", (15.0, 30.0), (30.0, 70.0)),

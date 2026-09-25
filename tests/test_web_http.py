@@ -1,4 +1,4 @@
-"""HTTP API contract (used by grid_dashboard.html, debug.html, the service worker)."""
+"""HTTP API contract (used by the single-page app and the service worker)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 import pytest
 from werkzeug.security import generate_password_hash
 
-from coop.config import AuthConfig
+from coop.config import AuthConfig, Mode
 
 
 def basic(user, pw):
@@ -22,15 +22,27 @@ class TestPages:
     def test_index(self, app, client):
         app.vapid_public_key = "PUBKEY123"
         body = client.get("/").get_data(as_text=True)
-        assert "Coop Door" in body and "PUBKEY123" in body and "europe - berlin" in body
+        assert "Dinky Coop" in body and '"PUBKEY123"' in body and "app/app.js" in body
+        assert "hardwareMock: true" in body and "abc1234" in body
 
-    def test_debug(self, client):
-        assert client.get("/debug").status_code == 200
+    def test_index_on_real_hardware(self, app, client):
+        app.hardware.gpio.is_mock = False
+        assert "hardwareMock: false" in client.get("/").get_data(as_text=True)
+
+    def test_debug_redirects_to_hardware_page(self, client):
+        resp = client.get("/debug")
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/#/hardware")
 
     def test_mock_panel_only_with_mock_hardware(self, app, client):
-        assert client.get("/mock").status_code == 200
+        resp = client.get("/mock")
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/#/hardware")
         app.hardware.gpio.is_mock = False
         assert client.get("/mock").status_code == 403
+
+    @pytest.mark.parametrize("path", ["app/app.js", "app/app.css", "fonts/figtree.woff2",
+                                      "fonts/bricolage-grotesque.woff2", "js/chart.umd.js", "js/socket.io.js"])
+    def test_shell_assets(self, client, path):
+        assert client.get(f"/static/{path}").status_code == 200
 
     @pytest.mark.parametrize("url, mimetype", [("/favicon.ico", "image/png"),
                                                 ("/manifest.json", "application/manifest+json"),
@@ -49,6 +61,25 @@ class TestPages:
 def test_status_endpoint(client):
     data = client.get("/api/status").get_json()
     assert data["state"] == "stopped" and "temp_in" in data
+
+
+def test_settings_endpoint(app, client):
+    app.config.update(mode=Mode.MANUAL, sunrise_offset=15, timer_open_time="06:30")
+    data = client.get("/api/settings").get_json()
+    assert data["mode"] == "manual" and data["sunrise_offset"] == 15 and data["timer_open_time"] == "06:30"
+    assert data["hardware_mock"] is True and data["auth_enabled"] is False and data["reference_travel_ms"] is None
+    assert set(data["location"]) >= {"city", "latitude", "longitude", "timezone"}
+
+
+def test_settings_endpoint_hides_no_secrets(app, client):
+    body = client.get("/api/settings").get_data(as_text=True)
+    assert "password" not in body
+
+
+def test_locations_endpoint(client):
+    data = client.get("/api/locations").get_json()
+    assert isinstance(data, list) and len(data) > 10
+    assert any("berlin" in str(x).lower() for x in data)
 
 
 def test_health(app, client):
@@ -170,6 +201,13 @@ class TestWifiApi:
         assert app.wifi.calls[-1] == ("start_ap", "DINKY-COOP", "password")
         assert app.clock.sleeps == [app.WIFI_FALLBACK_DELAY_S]
 
+    @pytest.mark.parametrize("password", [None, "", "********"])
+    def test_connect_to_saved_network_uses_saved_password(self, app, client, password):
+        app.config.update(wifi=app.settings.wifi.merged({"ssid": "Home", "password": "secret"}))
+        client.post("/api/wifi-connect", json={"ssid": "Home", "password": password})
+        client.post("/api/wifi-connect", json={"ssid": "Other", "password": password})
+        assert app.wifi.calls == [("connect", "Home", "secret"), ("connect", "Other", None)]
+
     @pytest.mark.parametrize("payload", [None, {"password": "x"}])
     def test_connect_validation(self, client, payload):
         assert client.post("/api/wifi-connect", json=payload).status_code == 400
@@ -200,6 +238,11 @@ class TestSystemApi:
     def test_update(self, app, client):
         assert client.post("/update").get_json() == {"status": "updating"}
         assert app.system.actions == [("update",)]
+
+    def test_update_refused(self, app, client):
+        app.system.update_error = RuntimeError("Updating is not supported on this host (mock hardware)")
+        resp = client.post("/update")
+        assert resp.status_code == 400 and "not supported" in resp.get_json()["error"]
 
 
 # ── captive portal ───────────────────────────────────────────────────────────

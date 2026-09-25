@@ -20,10 +20,12 @@ class DoorSimulator:
         self._pins = pins
         self.travel_time_s = travel_time_s
         self.position = position  # 0.0 = closed, 1.0 = open
+        self._applied: tuple[bool, bool] | None = None
         self._apply_endstops()
 
     def update_pins(self, pins: GpioConfig) -> None:
         self._pins = pins
+        self._applied = None
         self._apply_endstops()
 
     def tick(self, dt: float) -> None:
@@ -38,5 +40,10 @@ class DoorSimulator:
         pins = self._pins
         upper = self.position >= 1.0
         lower = self.position <= 0.0
+        # Only write on change, so endstops toggled by hand (web simulator
+        # panel) stay put until the simulated door actually moves.
+        if (upper, lower) == self._applied:
+            return
+        self._applied = (upper, lower)
         self._gpio.trigger(pins.endstop_up, upper != pins.invert_end_up)
         self._gpio.trigger(pins.endstop_down, lower != pins.invert_end_down)

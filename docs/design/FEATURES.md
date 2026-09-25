@@ -6,6 +6,11 @@ says nothing about how things look today, so a new design can start fresh.
 Screenshots of the current UI are in `current-ui/` for reference only.
 Section 9 lists the problems found in the current UI.
 
+> **Status:** implemented as layout F with the Slate & Amber palette
+> (`src/templates/app.html`, `src/static/app/`). Every function listed here
+> is covered by the browser tests in `tests/e2e/`. The old templates were
+> removed; `current-ui/` keeps the screenshots of the v1 UI for comparison.
+
 Captured 2026-09-25 from the running app (mock hardware + door simulator),
 v2 backend. Screens covered: desktop 1440×900, mobile 390×844, light and
 dark mode.

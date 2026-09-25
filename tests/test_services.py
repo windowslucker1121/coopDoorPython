@@ -328,6 +328,13 @@ class TestSystem:
         self.spawned[0]()
         assert self.exits == [0]
 
+    def test_update_refused_on_mock_host(self, tmp_path):
+        s = self.service(tmp_path, allow_system_changes=False)
+        with pytest.raises(RuntimeError, match="not supported"):
+            s.start_update()
+        self.popen.assert_not_called()
+        assert self.spawned == []
+
     def test_systemd_service_name(self, tmp_path, monkeypatch):
         monkeypatch.setenv("INVOCATION_ID", "x")
         real_open = open

@@ -14,7 +14,10 @@ def run_server(host: str = "0.0.0.0", port: int = 5000) -> None:
 
     # Configure logging *before* building the application so start-up
     # warnings (config fallbacks, missing hardware drivers) are recorded.
-    paths = Paths.default()
+    import os
+    # COOP_ROOT relocates config/log/secrets (used by the end-to-end tests).
+    root = os.environ.get("COOP_ROOT")
+    paths = Paths(root, src_dir=Paths.default().src) if root else Paths.default()
     buffer = LogBuffer()
     configure_logging(paths.log_dir, "INFO", buffer)
     Application(paths, log_buffer=buffer).run(host=host, port=port)
