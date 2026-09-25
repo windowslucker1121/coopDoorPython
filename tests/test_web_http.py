@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from unittest import mock
 
 import pytest
 from werkzeug.security import generate_password_hash
@@ -243,6 +244,49 @@ class TestSystemApi:
         app.system.update_error = RuntimeError("Updating is not supported on this host (mock hardware)")
         resp = client.post("/update")
         assert resp.status_code == 400 and "not supported" in resp.get_json()["error"]
+        resp = client.post("/update", json={"branch": "main"})
+        assert resp.status_code == 400 and "not supported" in resp.get_json()["error"]
+
+    def test_update_to_branch(self, app, client):
+        resp = client.post("/update", json={"branch": "claude/dev-feature"})
+        assert resp.get_json() == {"status": "updating", "branch": "claude/dev-feature"}
+        client.post("/update", json={"branch": "main"})
+        client.post("/update", json={})  # empty body -> current branch
+        assert app.system.actions == [("update", "claude/dev-feature"), ("update", "main"), ("update",)]
+
+    @pytest.mark.parametrize("body", [{"branch": ""}, {"branch": 5}, {"branch": ["main"]}, {"branch": "nope"}])
+    def test_update_to_bad_branch(self, app, client, body):
+        resp = client.post("/update", json=body)
+        assert resp.status_code == 400 and resp.get_json()["error"]
+        assert app.system.actions == []
+
+    def test_update_invalid_branch_name_from_real_service(self, app, client):
+        from coop.services.system import SystemService
+        app.system = SystemService(app.paths, run=mock.Mock(side_effect=AssertionError("git must not run")),
+                                   popen=mock.Mock(side_effect=AssertionError("must not spawn")))
+        for name in ("--upload-pack=touch /tmp/x", "main;rm -rf /", "../x", "a..b"):
+            resp = client.post("/update", json={"branch": name})
+            assert resp.status_code == 400 and resp.get_json()["error"] == "Invalid branch name"
+
+    def test_update_info(self, app, client):
+        info = client.get("/api/update/info").get_json()
+        assert info["branch"] == "main" and info["channel"] == "stable" and info["commit"] == "abc1234"
+        assert client.get("/api/update/info?check=1").get_json()["checked"] is True
+        assert app.system.actions == [("update_info", False), ("update_info", True)]
+        assert "no-store" in client.get("/api/update/info").headers["Cache-Control"]
+
+    def test_update_branches(self, client):
+        res = client.get("/api/update/branches").get_json()
+        assert [b["name"] for b in res["branches"]] == ["claude/dev-feature", "main"]
+        assert res["stable_branch"] == "main" and res["current"] == "main"
+
+    def test_update_routes_on_host_without_git(self, app, client):
+        from coop.services.system import SystemService
+        app.system = SystemService(app.paths, run=mock.Mock(side_effect=FileNotFoundError("git")))
+        info = client.get("/api/update/info").get_json()
+        assert info["git"] is False and "git is not installed" in info["error"]
+        res = client.get("/api/update/branches")
+        assert res.status_code == 200 and res.get_json()["branches"] == []
 
 
 # ── captive portal ───────────────────────────────────────────────────────────
@@ -300,6 +344,13 @@ class TestAuth:
 
     def test_valid_credentials(self, secured, client):
         assert client.get("/api/status", headers=basic("admin", "s3cret-pass")).status_code == 200
+
+    def test_update_routes_require_auth(self, secured, client):
+        for path in ("/api/update/info", "/api/update/branches"):
+            assert client.get(path).status_code == 401
+            assert client.get(path, headers=basic("admin", "s3cret-pass")).status_code == 200
+        assert client.post("/update", json={"branch": "main"}).status_code == 401
+        assert secured.system.actions == [("update_info", False)]
 
     @pytest.mark.parametrize("path", ["/static/offline.html", "/manifest.json", "/sw.js", "/generate_204",
                                       "/hotspot-detect.html", "/favicon.ico"])

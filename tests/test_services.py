@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -346,6 +348,223 @@ class TestSystem:
             return real_open(path, *a, **k)
         monkeypatch.setattr("builtins.open", fake_open)
         assert SystemService._systemd_service_name() == "chicken.service"
+
+
+# ═══════════════════════════ releases (git branches) ═════════════════════════
+
+REFS = "\n".join([
+    "refs/remotes/origin/HEAD\x00abc1234\x002026-09-03T10:00:00+00:00\x00Stable release",
+    "refs/remotes/origin/claude/dev\x00bbb2222\x002026-09-02T10:00:00+00:00\x00Dev work",
+    "refs/remotes/origin/main\x00abc1234\x002026-09-01T10:00:00+00:00\x00Stable release",
+    "refs/remotes/origin/-evil\x00ccc3333\x002026-08-01T10:00:00+00:00\x00Bad name",
+    "refs/remotes/upstream/other\x00ddd4444\x002026-08-01T10:00:00+00:00\x00Other remote",
+    "garbage line",
+]) + "\n"
+
+
+class FakeGit:
+    """``run`` stand-in answering the git commands SystemService issues."""
+
+    def __init__(self, branch="main", upstream="origin/main", behind="2", fetch_error=None,
+                 refs=REFS, missing=False):
+        self.branch, self.upstream, self.behind = branch, upstream, behind
+        self.fetch_error, self.refs, self.missing = fetch_error, refs, missing
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(cmd)
+        if cmd[0] != "git":
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        assert cmd[1:3] == ["-c", "safe.directory=*"] and "shell" not in kw and kw.get("timeout")
+        if self.missing:
+            raise FileNotFoundError("git")
+        args = cmd[3:]
+
+        def ok(out=""):
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+
+        def fail(err="fatal: nope"):
+            return mock.Mock(returncode=1, stdout="", stderr=err)
+
+        sub = args[0]
+        if sub == "fetch":
+            if isinstance(self.fetch_error, BaseException):
+                raise self.fetch_error
+            return fail(self.fetch_error) if self.fetch_error else ok()
+        if sub == "log":
+            return ok("abc1234\x002026-09-01T10:00:00+00:00\x00Stable release\n")
+        if sub == "symbolic-ref":
+            return ok(self.branch + "\n") if self.branch else fail("")
+        if sub == "rev-parse" and "@{u}" in args:
+            return ok(self.upstream + "\n") if self.upstream else fail("fatal: no upstream")
+        if sub == "rev-parse":
+            return ok("true\n")
+        if sub == "rev-list":
+            return ok(self.behind + "\n")
+        if sub == "for-each-ref":
+            return ok(self.refs)
+        raise AssertionError(f"unexpected git call {cmd}")
+
+    def subcommands(self):
+        return [c[3] for c in self.calls if c[0] == "git"]
+
+
+class TestReleases:
+
+    def service(self, tmp_path, git: FakeGit, **kw):
+        self.popen = mock.Mock()
+        self.spawned = []
+        self.exits = []
+        return SystemService(Paths(str(tmp_path)), run=git, popen=self.popen, spawn=self.spawned.append,
+                             exit_process=self.exits.append, sleep=lambda s: None, **kw)
+
+    @pytest.mark.parametrize("name", ["main", "dev", "claude/epic-albattani-otolau", "feat/data_classes",
+                                      "v1.2.3", "release-2026.09", "a/b/c"])
+    def test_safe_branch_names(self, name):
+        from coop.services.system import is_safe_branch_name
+        assert is_safe_branch_name(name)
+
+    @pytest.mark.parametrize("name", [
+        "", " ", "--upload-pack=x", "-x", "main;rm -rf /", "main && reboot", "$(reboot)", "`id`",
+        "../x", "a/../b", "a..b", "a b", "a\nb", "a\tb", "a\x00b", "/main", "main/", "a//b", ".hidden",
+        "a/.b", "x.lock", "a.lock/b", "main.", "a@{u}", "a~1", "a^", "a:b", "a?", "a*", "a[b", "a\\b",
+        "HEAD", "é", "x" * 201, None, 5, ["main"],
+    ])
+    def test_unsafe_branch_names(self, name):
+        from coop.services.system import is_safe_branch_name
+        assert not is_safe_branch_name(name)
+
+    def test_update_script_uses_the_same_rules(self):
+        import update_script
+        from coop.services.system import is_safe_branch_name
+        for name in ("main", "claude/x", "--upload-pack=x", "a..b", "x.lock", "HEAD", "a b", "../x"):
+            assert update_script.is_safe_branch_name(name) == is_safe_branch_name(name)
+
+    def test_parse_branch_list(self):
+        from coop.services.system import parse_branch_list
+        branches = parse_branch_list(REFS)
+        assert [b["name"] for b in branches] == ["claude/dev", "main"]
+        assert branches[0] == {"name": "claude/dev", "commit": "bbb2222",
+                               "date": "2026-09-02T10:00:00+00:00", "subject": "Dev work"}
+        assert parse_branch_list("") == [] and parse_branch_list(None) == []
+
+    def test_info_on_stable_branch(self, tmp_path):
+        git = FakeGit()
+        info = self.service(tmp_path, git).update_info()
+        assert info["git"] and info["supported"]
+        assert info["branch"] == "main" and info["channel"] == "stable" and not info["detached"]
+        assert info["commit"] == "abc1234" and info["subject"] == "Stable release"
+        assert info["commit_date"] == "2026-09-01T10:00:00+00:00"
+        assert info["upstream"] == "origin/main" and info["behind"] == 2
+        assert info["stable_branch"] == "main" and not info["checked"]
+        assert "fetch" not in git.subcommands()
+
+    def test_git_runs_in_the_code_checkout_not_the_data_root(self, tmp_path):
+        s = SystemService(Paths(str(tmp_path / "data"), src_dir=str(tmp_path / "code" / "src")))
+        assert s.repo_dir == str(tmp_path / "code")
+
+    def test_info_check_fetches_the_upstream_branch(self, tmp_path):
+        git = FakeGit(branch="claude/dev", upstream="origin/claude/dev")
+        info = self.service(tmp_path, git, allow_system_changes=False).update_info(check=True)
+        assert info["channel"] == "dev" and info["checked"] and not info["supported"]
+        fetch = next(c for c in git.calls if c[3] == "fetch")
+        assert fetch[-2:] == ["origin", "+refs/heads/claude/dev:refs/remotes/origin/claude/dev"]
+
+    def test_info_check_failure_is_reported(self, tmp_path):
+        git = FakeGit(fetch_error="fatal: unable to access")
+        info = self.service(tmp_path, git).update_info(check=True)
+        assert not info["checked"] and "unable to access" in info["error"]
+        assert info["behind"] == 2   # still computed from the known refs
+
+    def test_info_detached_head(self, tmp_path):
+        info = self.service(tmp_path, FakeGit(branch="")).update_info(check=True)
+        assert info["detached"] and info["branch"] is None and info["channel"] == "dev"
+        assert info["commit"] == "abc1234" and info["upstream"] is None
+
+    def test_info_without_git(self, tmp_path):
+        info = self.service(tmp_path, FakeGit(missing=True)).update_info()
+        assert not info["git"] and "git is not installed" in info["error"]
+
+    def test_info_without_repository(self, tmp_path):
+        # Real git on a directory that is not a checkout (tmp_path).
+        info = SystemService(Paths(str(tmp_path))).update_info()
+        assert not info["git"] and info["error"]
+        assert SystemService(Paths(str(tmp_path))).list_branches()["branches"] == []
+
+    def test_list_branches(self, tmp_path):
+        git = FakeGit(branch="claude/dev")
+        res = self.service(tmp_path, git).list_branches()
+        assert res["refreshed"] and res["warning"] is None and res["error"] is None
+        assert res["current"] == "claude/dev" and res["stable_branch"] == "main"
+        assert [(b["name"], b["current"], b["stable"]) for b in res["branches"]] == [
+            ("claude/dev", True, False), ("main", False, True)]
+        fetch = next(c for c in git.calls if c[3] == "fetch")
+        assert fetch[3:] == ["fetch", "--quiet", "--prune", "origin"]
+
+    @pytest.mark.parametrize("error", ["fatal: could not resolve host", subprocess.TimeoutExpired("git", 20)])
+    def test_list_branches_falls_back_when_fetch_fails(self, tmp_path, error):
+        res = self.service(tmp_path, FakeGit(fetch_error=error)).list_branches()
+        assert not res["refreshed"] and "Could not refresh" in res["warning"]
+        assert [b["name"] for b in res["branches"]] == ["claude/dev", "main"]
+
+    def test_list_branches_without_git(self, tmp_path):
+        res = self.service(tmp_path, FakeGit(missing=True)).list_branches()
+        assert res["branches"] == [] and "git is not installed" in res["error"]
+
+    def test_update_current_branch(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("INVOCATION_ID", raising=False)
+        s = self.service(tmp_path, FakeGit())
+        s.start_update()
+        cmd = self.popen.call_args[0][0]
+        assert "--branch" not in cmd and len(cmd) == 4
+        self.spawned[0]()
+        assert self.exits == [0]
+
+    def test_update_to_branch(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("INVOCATION_ID", "x")
+        monkeypatch.setattr(SystemService, "_systemd_service_name", staticmethod(lambda: "coop.service"))
+        s = self.service(tmp_path, FakeGit())
+        s.start_update(branch="claude/dev")
+        cmd = self.popen.call_args[0][0]
+        assert cmd[0] == sys.executable and cmd[1].endswith("update_script.py")
+        assert cmd[2:4] == ["--branch", "claude/dev"]
+        assert cmd[4].endswith("app.py") and cmd[5] == str(os.getpid()) and cmd[6] == "coop.service"
+        assert len(self.spawned) == 1
+
+    def test_update_to_stable(self, tmp_path):
+        s = self.service(tmp_path, FakeGit(branch="claude/dev"))
+        s.start_update(branch="main")
+        assert self.popen.call_args[0][0][2:4] == ["--branch", "main"]
+
+    @pytest.mark.parametrize("name", ["--upload-pack=x", "main;rm -rf /", "../x", "a..b", "", "-evil"])
+    def test_update_rejects_unsafe_branch_before_calling_git(self, tmp_path, name):
+        git = FakeGit()
+        with pytest.raises(ValueError, match="Invalid branch"):
+            self.service(tmp_path, git).start_update(branch=name)
+        assert git.calls == [] and not self.popen.called and self.spawned == []
+
+    def test_update_rejects_unknown_branch(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown branch"):
+            self.service(tmp_path, FakeGit()).start_update(branch="does-not-exist")
+        assert not self.popen.called
+
+    def test_update_to_branch_refused_on_mock_host(self, tmp_path):
+        git = FakeGit()
+        with pytest.raises(RuntimeError, match="not supported"):
+            self.service(tmp_path, git, allow_system_changes=False).start_update(branch="main")
+        assert git.calls == [] and not self.popen.called
+
+    def test_update_to_branch_without_git(self, tmp_path):
+        with pytest.raises(RuntimeError, match="git is not installed"):
+            self.service(tmp_path, FakeGit(missing=True)).start_update(branch="main")
+        assert not self.popen.called
+
+    def test_update_on_detached_head_needs_a_branch(self, tmp_path):
+        s = self.service(tmp_path, FakeGit(branch=""))
+        with pytest.raises(ValueError, match="detached"):
+            s.start_update()
+        s.start_update(branch="main")
+        assert self.popen.called
 
 
 # ═══════════════════════════ workers ═════════════════════════════════════════

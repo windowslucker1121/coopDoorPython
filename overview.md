@@ -29,7 +29,9 @@ single-page web app (`src/templates/app.html`, `src/static/app/`,
   optional webcam stream.
 * Wi-Fi management (NetworkManager): joins the configured network or falls
   back to a hotspot with a captive portal.
-* Self-update (`git pull` and restart), reboot, and setting the system time.
+* Self-update and **release channels**: update the installed branch, or
+  switch between the stable branch (`main`) and any dev branch on `origin`
+  from the web UI; plus reboot and setting the system time.
 * Optional HTTP Basic authentication.
 * A complete **mock mode with a door simulator**, so the application runs on
   any computer.
@@ -41,7 +43,7 @@ single-page web app (`src/templates/app.html`, `src/static/app/`,
 ```
 src/
 ├── app.py                    entry point: gevent monkey-patch → coop CLI "run"
-├── update_script.py          detached self-update helper (kill → git pull → restart)
+├── update_script.py          detached self-update helper (kill → git update / branch switch → pip → restart)
 ├── generateVapidPair.py      creates VAPID keys in <root>/.secrets.yaml
 ├── generateIcons.py          renders the PWA icons
 └── coop/
@@ -69,7 +71,7 @@ src/
     │   ├── notifications.py  SubscriptionStore, PushNotifier (async), VAPID keys
     │   ├── datalog.py        CSV logger + CSV / app-log viewers
     │   ├── wifi.py           WifiManager (nmcli), boot watchdog
-    │   ├── system.py         uptime/metrics, version, set time, reboot, update
+    │   ├── system.py         uptime/metrics, version, set time, reboot, update, release branches
     │   └── sun.py            SunCalculator (cached), astral location list
     └── web/
         ├── __init__.py       create_web(app) → Flask + Socket.IO
@@ -241,11 +243,55 @@ immutable `status`. One `step()`:
 | Log and data viewers | `/api/logs[/<f>]`, `/api/csv[/<f>]` |
 | Configuration | `/api/gpio-config` (GET/POST), `/api/wifi-config` (GET/POST; passwords are masked as `********`, which is ignored on save) |
 | Wi-Fi | `/api/wifi-status`, `/api/wifi-scan`, `POST /api/wifi-ap`, `POST /api/wifi-connect` |
-| System | `POST /api/system/time`, `POST /api/restart`, `POST /update` |
+| System | `POST /api/system/time`, `POST /api/restart`, `POST /update` (optional `{"branch": …}`) |
+| Releases | `GET /api/update/info[?check=1]`, `GET /api/update/branches` (see *Updates and release channels* below) |
 | Captive-portal probes | `/generate_204`, `/gen_204`, `/hotspot-detect.html`, `/success.html` |
 | Status | `GET /api/status` (dashboard payload), `GET /api/health` (worker liveness, 503 if a worker died), `GET /api/settings` (mode, offsets, timer, location, flags - no secrets), `GET /api/locations` (city list for the location search) |
 
 `/api/*` responses are never cached.
+
+### Updates and release channels
+
+The controller runs from a git checkout. `SystemService` (in
+`services/system.py`) reads it with `git` in the code checkout (the parent
+of `src/`, not `COOP_ROOT`), always with list arguments, a timeout and
+`GIT_TERMINAL_PROMPT=0`:
+
+* `GET /api/update/info` - `{branch, detached, channel ("stable" | "dev"),
+  commit, commit_date, subject, upstream, behind, checked, supported,
+  stable_branch, git, error}`. `?check=1` first fetches the upstream branch so
+  `behind` (commits waiting) is current; the UI asks without, then with it.
+* `GET /api/update/branches` - `git fetch --prune origin`, then the
+  `origin/*` branches newest first: `{branches: [{name, commit, date,
+  subject, current, stable}], current, stable_branch, refreshed, warning,
+  error}`. A failed or timed-out fetch is not an error: the last known
+  remote-tracking refs are returned with a `warning`. Without git or a
+  repository the list is empty and `error` says why (HTTP 200).
+* `POST /update` - no body: update the installed branch from its upstream
+  (the original behaviour; refused on a detached HEAD). `{"branch": name}`:
+  switch to `origin/<name>`; "Switch to stable" is `{"branch": "main"}`.
+  The name must pass `is_safe_branch_name` (ASCII words separated by single
+  slashes; no leading `-` or `.`, no `..`, spaces, control or git special
+  characters) **and** be in the freshly fetched branch list, otherwise 400.
+  Mock hardware refuses both forms with 400 (browsing works everywhere).
+
+`update_script.py [--branch NAME] <app_entrypoint> <pid> [service]` does the
+work after the app has exited: remove empty git objects, then either
+`fetch --all` / `reset --hard @{u}` / `pull`, or for a branch
+`fetch origin +refs/heads/NAME:refs/remotes/origin/NAME`,
+`checkout -f -B NAME origin/NAME`, `branch --set-upstream-to=origin/NAME`,
+`reset --hard origin/NAME`. If `requirements.txt` differs between the old
+and new commit it runs `python -m pip install -r requirements.txt` with the
+same interpreter. Git or pip failures are logged and the app is restarted
+regardless (systemd service or direct relaunch). The helper re-checks the
+branch name itself and leaves the checkout alone if it is unsafe.
+
+On the **System & updates** page the *Updates & power* card shows the channel
+(Stable / Dev), the branch (or "detached at <hash>"), commit and date, and
+"Update available" when the upstream is ahead. *Switch to dev release* opens
+a filterable branch picker; choosing a branch shows a confirmation (with an
+instability warning for dev branches), posts `/update` and waits for the
+controller to come back. On a dev branch, *Switch to stable (main)* returns.
 
 **Socket.IO:**
 
@@ -332,7 +378,7 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
 | `test_schedule.py` | Open periods, wrap-around, crossings, sun times and offsets, polar |
 | `test_config.py` | Parsers, sections, YAML compatibility, lenient loading, atomic store, listeners |
 | `test_hardware.py` | MockGpio, RpiGpio adapter, DHT (retry, re-init, power), Open-Meteo, CPU, camera, simulator, factory |
-| `test_services.py` | Environment monitor, notifications, CSV and log viewers, system service, workers, logging |
+| `test_services.py` | Environment monitor, notifications, CSV and log viewers, system service, release branches (parsing, name validation, info, switching), workers, logging |
 | `test_wifi.py` | nmcli parsing, AP detection, actions, watchdog |
 | `test_web_http.py` / `test_web_sockets.py` / `test_payloads.py` | The complete frontend contract, auth, captive portal |
 | `test_application.py` | Wiring, workers, camera, CLI, and an **end-to-end day** on the simulator with a fake clock |
@@ -340,6 +386,7 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
 | `e2e/test_e2e_door.py` | In a real browser against the real server: navigation, door commands, calibration, modes, fault / override / clock / offline banners, simulator panel |
 | `e2e/test_e2e_live.py` | Live internals (updates without interaction, follows a door move, fault, switch, pause, filter, copy) and every Use-my-location path |
 | `e2e/test_e2e_pages.py` | Every settings form (valid and invalid input), charts, camera, network, pins, logs filters, system actions, theme, service worker, phone layout, dark mode |
+| `e2e/test_e2e_update.py` | Release card, branch picker (filter, cancel, stable / dev confirmations), refusal on mock hardware, phone layout, stubbed update-available / detached / git-missing states |
 
 **Extending:**
 * New sensor: subclass `TemperatureSensor` and select it in `build_hardware`.

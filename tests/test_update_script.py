@@ -77,3 +77,103 @@ def test_missing_killall_is_tolerated(fakes, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["update_script.py", "/x/src/app.py", "1234"])
     update_script.main()
     fakes.Popen.assert_called_once()
+
+
+# ── release branches ─────────────────────────────────────────────────────────
+
+GIT = ["git", "-c", "safe.directory=*"]
+
+
+def test_parse_args_is_backward_compatible():
+    assert update_script.parse_args(["/x/app.py", "12", "svc"]) == (None, ["/x/app.py", "12", "svc"], True)
+    assert update_script.parse_args(["--branch", "claude/dev", "/x/app.py", "12"]) == \
+        ("claude/dev", ["/x/app.py", "12"], True)
+    assert update_script.parse_args(["--branch=main", "/x/app.py", "12"]) == ("main", ["/x/app.py", "12"], True)
+
+
+@pytest.mark.parametrize("name", ["--upload-pack=x", "main;rm -rf /", "../x", "a..b", "-x", "a b"])
+def test_parse_args_refuses_unsafe_branch(name):
+    branch, rest, valid = update_script.parse_args(["--branch", name, "/x/app.py", "12"])
+    assert branch is None and not valid and rest == ["/x/app.py", "12"]
+
+
+def test_switch_branch_flow(fakes, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "--branch", "claude/dev", "/x/src/app.py", "1234",
+                                      "chicken.service"])
+    update_script.main()
+    fakes.kill.assert_called_once_with(1234, signal.SIGTERM)
+    cmds = _run_cmds(fakes)
+    fetch = GIT + ["fetch", "origin", "+refs/heads/claude/dev:refs/remotes/origin/claude/dev"]
+    checkout = GIT + ["checkout", "-f", "-B", "claude/dev", "origin/claude/dev"]
+    upstream = GIT + ["branch", "--set-upstream-to=origin/claude/dev", "claude/dev"]
+    reset = GIT + ["reset", "--hard", "origin/claude/dev"]
+    for c in (fetch, checkout, upstream, reset):
+        assert c in cmds
+    assert cmds.index(fetch) < cmds.index(checkout) < cmds.index(upstream) < cmds.index(reset)
+    assert GIT + ["pull"] not in cmds and GIT + ["reset", "--hard", "@{u}"] not in cmds
+    assert cmds[-1] == ["sudo", "systemctl", "restart", "chicken.service"]
+
+
+def test_failed_checkout_still_restarts(fakes, monkeypatch):
+    def run(cmd, check=False, **kw):
+        if "checkout" in cmd and check:
+            raise subprocess.CalledProcessError(1, cmd)
+        return mock.Mock(returncode=0, stdout="")
+    fakes.run.side_effect = run
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "--branch", "main", "/x/src/app.py", "1234"])
+    update_script.main()
+    assert not any("reset" in c for c in _run_cmds(fakes))
+    fakes.Popen.assert_called_once()
+
+
+def test_unsafe_branch_only_restarts(fakes, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "--branch", "--upload-pack=x", "/x/src/app.py", "1234"])
+    update_script.main()
+    assert not any(c[0] == "git" for c in _run_cmds(fakes))
+    args, _ = fakes.Popen.call_args
+    assert args[0] == [sys.executable, "/x/src/app.py"]
+
+
+def _git_fake(heads, changed):
+    """run() answering rev-parse with successive heads and diff with ``changed``."""
+    heads = list(heads)
+
+    def run(cmd, **kw):
+        if cmd[:3] == GIT and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return mock.Mock(returncode=0, stdout=heads.pop(0) + "\n")
+        if cmd[:3] == GIT and cmd[3] == "diff":
+            return mock.Mock(returncode=0, stdout=changed)
+        return mock.Mock(returncode=0, stdout="")
+    return run
+
+
+def test_requirements_are_installed_when_changed(fakes, monkeypatch):
+    fakes.run.side_effect = _git_fake(["aaa", "bbb"], "requirements.txt\n")
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "--branch", "main", "/x/src/app.py", "1234", "svc"])
+    update_script.main()
+    cmds = _run_cmds(fakes)
+    assert GIT + ["diff", "--name-only", "aaa", "bbb", "--", "requirements.txt"] in cmds
+    pip = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"]
+    assert pip in cmds and cmds.index(pip) < cmds.index(["sudo", "systemctl", "restart", "svc"])
+
+
+@pytest.mark.parametrize("heads,changed", [(["aaa", "aaa"], ""), (["aaa", "bbb"], "")])
+def test_requirements_not_installed_when_unchanged(fakes, monkeypatch, heads, changed):
+    fakes.run.side_effect = _git_fake(heads, changed)
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "/x/src/app.py", "1234"])
+    update_script.main()
+    assert not any(c[:2] == [sys.executable, "-m"] for c in _run_cmds(fakes))
+    fakes.Popen.assert_called_once()
+
+
+def test_failed_pip_install_still_restarts(fakes, monkeypatch):
+    base = _git_fake(["aaa", "bbb"], "requirements.txt\n")
+
+    def run(cmd, **kw):
+        if cmd[:2] == [sys.executable, "-m"]:
+            raise subprocess.TimeoutExpired(cmd, 900)
+        return base(cmd, **kw)
+    fakes.run.side_effect = run
+    monkeypatch.setattr(sys, "argv", ["update_script.py", "/x/src/app.py", "1234"])
+    update_script.main()
+    fakes.Popen.assert_called_once()

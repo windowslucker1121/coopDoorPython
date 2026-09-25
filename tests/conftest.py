@@ -168,10 +168,30 @@ class FakeSystem:
             raise self.reboot_error
         self.actions.append(("reboot",))
 
-    def start_update(self) -> None:
+    def start_update(self, branch: str | None = None) -> None:
         if self.update_error:
             raise self.update_error
-        self.actions.append(("update",))
+        if branch is not None and branch not in {b["name"] for b in self.branches}:
+            raise ValueError(f"Unknown branch: {branch}")
+        self.actions.append(("update",) if branch is None else ("update", branch))
+
+    branches = [
+        {"name": "claude/dev-feature", "commit": "bbb2222", "date": "2026-09-02T10:00:00+00:00",
+         "subject": "Dev work", "current": False, "stable": False},
+        {"name": "main", "commit": "abc1234", "date": "2026-09-01T10:00:00+00:00",
+         "subject": "Stable release", "current": True, "stable": True},
+    ]
+
+    def update_info(self, check: bool = False) -> dict:
+        self.actions.append(("update_info", check))
+        return {"supported": True, "stable_branch": "main", "git": True, "branch": "main",
+                "detached": False, "channel": "stable", "commit": "abc1234",
+                "commit_date": "2026-09-01T10:00:00+00:00", "subject": "Stable release",
+                "upstream": "origin/main", "behind": 0, "checked": check, "error": None}
+
+    def list_branches(self) -> dict:
+        return {"branches": self.branches, "current": "main", "stable_branch": "main",
+                "refreshed": True, "warning": None, "error": None}
 
 
 class FakeWifi(WifiManager):

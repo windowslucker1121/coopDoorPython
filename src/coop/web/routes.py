@@ -257,13 +257,32 @@ def register_routes(flask_app: Flask, app: "Application") -> None:
             return _error(str(e))
         return jsonify({"status": "rebooting device"})
 
+    @flask_app.route("/api/update/info")
+    def update_info():
+        check = request.args.get("check", "").lower() in ("1", "true", "yes")
+        return jsonify(app.system.update_info(check=check))
+
+    @flask_app.route("/api/update/branches")
+    def update_branches():
+        return jsonify(app.system.list_branches())
+
     @flask_app.route("/update", methods=["POST"])
     def update():
+        # Optional JSON body {"branch": "<name>"} switches the release branch;
+        # without it the current branch is updated (the original behaviour).
+        data = request.get_json(silent=True)
+        branch = data.get("branch") if isinstance(data, dict) else None
+        if branch is not None and (not isinstance(branch, str) or not branch.strip()):
+            return _error("Branch must be a non-empty string")
         try:
-            app.system.start_update()
-        except RuntimeError as e:
+            if branch is None:
+                app.system.start_update()
+                return jsonify({"status": "updating"})
+            branch = branch.strip()
+            app.system.start_update(branch=branch)
+        except (RuntimeError, ValueError) as e:
             return _error(str(e))
-        return jsonify({"status": "updating"})
+        return jsonify({"status": "updating", "branch": branch})
 
     # ── captive-portal probes ────────────────────────────────────────
     @flask_app.route("/generate_204")

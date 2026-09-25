@@ -1,9 +1,11 @@
-"""Operating-system level operations: metrics, version, time, reboot, update."""
+"""Operating-system level operations: metrics, version, time, reboot, update
+and release (git branch) selection."""
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -16,6 +18,50 @@ import psutil
 from ..paths import Paths
 
 logger = logging.getLogger(__name__)
+
+#: The branch that holds stable releases ("Switch to stable" goes here).
+STABLE_BRANCH = "main"
+#: Remote whose branches are offered as releases.
+REMOTE = "origin"
+
+# Conservative subset of git's ref-name rules: ASCII words separated by single
+# slashes, never starting with "-" (option injection) or "." (hidden / "..").
+_BRANCH_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*")
+
+
+def is_safe_branch_name(name: object) -> bool:
+    """True for a branch name that is safe to hand to git as an argument.
+
+    The same rules are duplicated in ``src/update_script.py`` (which must run
+    stand-alone)."""
+    if not isinstance(name, str) or not 0 < len(name) <= 200:
+        return False
+    if not _BRANCH_RE.fullmatch(name):
+        return False
+    if ".." in name or name.endswith((".", ".lock")) or ".lock/" in name:
+        return False
+    return name != "HEAD"
+
+
+def parse_branch_list(output: str) -> list[dict]:
+    """Parse ``git for-each-ref`` output (NUL-separated full refname, short
+    hash, ISO date and subject per line) into branch dicts, skipping
+    ``HEAD`` and anything that is not a safe branch name."""
+    prefix = f"refs/remotes/{REMOTE}/"
+    branches = []
+    for line in (output or "").splitlines():
+        parts = line.split("\0")
+        if len(parts) < 4 or not parts[0].startswith(prefix):
+            continue
+        name = parts[0][len(prefix):]
+        if not is_safe_branch_name(name):
+            continue
+        branches.append({"name": name, "commit": parts[1], "date": parts[2], "subject": " ".join(parts[3:])})
+    return branches
+
+
+class GitError(RuntimeError):
+    """A git command failed, timed out or git is not available."""
 
 
 class SystemService:
@@ -31,6 +77,10 @@ class SystemService:
         self._exit = exit_process
         self._sleep = sleep
         self._boot_time = datetime.fromtimestamp(psutil.boot_time())
+        # The code checkout is the parent of src/ - not paths.root, which
+        # COOP_ROOT may relocate for config and logs.
+        self.repo_dir = os.path.dirname(os.path.abspath(paths.src))
+        self.stable_branch = STABLE_BRANCH
 
     # ── information ──────────────────────────────────────────────────
     def uptime(self) -> str:
@@ -73,6 +123,117 @@ class SystemService:
         except Exception as e:
             logger.warning("Could not determine git version: %s", e)
 
+    # ── releases (git branches) ──────────────────────────────────────
+    def _git(self, *args: str, timeout: float = 10) -> str:
+        """Run git in the code checkout and return stdout.
+
+        Arguments are passed as a list (never through a shell); callers only
+        pass constants or names checked by :func:`is_safe_branch_name`."""
+        cmd = ["git", "-c", "safe.directory=*", *args]
+        try:
+            result = self._run(cmd, cwd=self.repo_dir, capture_output=True, text=True, timeout=timeout,
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C"))
+        except FileNotFoundError:
+            raise GitError("git is not installed") from None
+        except subprocess.TimeoutExpired:
+            raise GitError(f"git {args[0]} timed out after {timeout:g} s") from None
+        except OSError as e:
+            raise GitError(f"git {args[0]} failed: {e}") from None
+        if result.returncode != 0:
+            err = (result.stderr if isinstance(result.stderr, str) else "").strip().splitlines()
+            raise GitError(err[-1] if err else f"git {args[0]} failed (exit {result.returncode})")
+        return result.stdout if isinstance(result.stdout, str) else ""
+
+    def _current_branch(self) -> str | None:
+        """Checked-out branch name, or ``None`` for a detached HEAD / no repo."""
+        try:
+            return self._git("symbolic-ref", "--short", "-q", "HEAD").strip() or None
+        except GitError:
+            return None
+
+    def _is_git_checkout(self) -> bool:
+        try:
+            return self._git("rev-parse", "--is-inside-work-tree").strip() == "true"
+        except GitError:
+            return False
+
+    def _fetch(self, *refspecs: str, prune: bool = False, timeout: float = 20) -> str | None:
+        """Fetch from the release remote; returns an error message or ``None``."""
+        try:
+            self._git("fetch", "--quiet", *(["--prune"] if prune else []), REMOTE, *refspecs, timeout=timeout)
+            return None
+        except GitError as e:
+            logger.warning("git fetch failed: %s", e)
+            return str(e)
+
+    def _remote_branches(self) -> list[dict]:
+        out = self._git("for-each-ref", "--sort=-committerdate",
+                        "--format=%(refname)%00%(objectname:short)%00%(committerdate:iso-strict)%00%(subject)",
+                        f"refs/remotes/{REMOTE}/")
+        return parse_branch_list(out)
+
+    def update_info(self, check: bool = False) -> dict:
+        """The running release: branch / channel and commit.  With ``check``
+        the upstream is fetched first so ``behind`` is up to date."""
+        info = {"supported": self._allow, "stable_branch": self.stable_branch, "git": False,
+                "branch": None, "detached": False, "channel": None, "commit": None,
+                "commit_date": None, "subject": None, "upstream": None, "behind": None,
+                "checked": False, "error": None}
+        try:
+            head = self._git("log", "-1", "--format=%h%x00%cI%x00%s", "HEAD").strip().split("\0")
+        except GitError as e:
+            info["error"] = f"Release information unavailable: {e}"
+            return info
+        info["git"] = True
+        info["commit"], info["commit_date"], info["subject"] = (head + ["", "", ""])[:3]
+        branch = self._current_branch()
+        info["branch"] = branch
+        info["detached"] = branch is None
+        info["channel"] = "stable" if branch == self.stable_branch else "dev"
+        if branch is None:
+            return info
+        try:
+            upstream = self._git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").strip()
+        except GitError:
+            upstream = ""
+        info["upstream"] = upstream or None
+        if not upstream:
+            return info
+        if check:
+            remote, _, name = upstream.partition("/")
+            if remote == REMOTE and is_safe_branch_name(name):
+                err = self._fetch(f"+refs/heads/{name}:refs/remotes/{REMOTE}/{name}", timeout=15)
+                info["checked"] = err is None
+                if err:
+                    info["error"] = f"Could not check for updates: {err}"
+        try:
+            info["behind"] = int(self._git("rev-list", "--count", "HEAD..@{u}").strip() or 0)
+        except (GitError, ValueError):
+            pass
+        return info
+
+    def list_branches(self) -> dict:
+        """Refresh (``git fetch --prune``) and list the remote's branches,
+        newest commit first.  A failed fetch falls back to the known refs."""
+        result = {"branches": [], "current": None, "stable_branch": self.stable_branch,
+                  "refreshed": False, "warning": None, "error": None}
+        err = self._fetch(prune=True)
+        result["refreshed"] = err is None
+        try:
+            branches = self._remote_branches()
+        except GitError as e:
+            result["error"] = f"Branches unavailable: {e}"
+            return result
+        if err:
+            result["warning"] = f"Could not refresh the branch list ({err}) - showing the last known branches."
+        current = self._current_branch()
+        for b in branches:
+            b["current"] = b["name"] == current
+            b["stable"] = b["name"] == self.stable_branch
+        result["branches"] = branches
+        result["current"] = current
+        return result
+
     # ── actions ──────────────────────────────────────────────────────
     def set_time(self, value: str) -> None:
         """Set the system clock (``YYYY-MM-DD HH:MM:SS``).
@@ -103,13 +264,35 @@ class SystemService:
 
         self._spawn(do_reboot)
 
-    def start_update(self) -> None:
-        """Launch the detached update helper, then exit this process."""
+    def start_update(self, branch: str | None = None) -> None:
+        """Launch the detached update helper, then exit this process.
+
+        Without ``branch`` the current branch is updated from its upstream;
+        with ``branch`` the checkout switches to ``origin/<branch>``.
+        Raises ``RuntimeError`` on hosts that must not change and
+        ``ValueError`` for an unknown / unsafe branch."""
         if not self._allow:
             raise RuntimeError("Updating is not supported on this host (mock hardware)")
-        logger.info("Update requested. Starting update helper...")
+        if branch is not None:
+            if not is_safe_branch_name(branch):
+                raise ValueError("Invalid branch name")
+            self._fetch(prune=True)
+            try:
+                known = {b["name"] for b in self._remote_branches()}
+            except GitError as e:
+                raise RuntimeError(f"Cannot switch release: {e}") from None
+            if branch not in known:
+                raise ValueError(f"Unknown branch: {branch}")
+            logger.info("Switch to release branch %s requested. Starting update helper...", branch)
+        else:
+            if self._current_branch() is None and self._is_git_checkout():
+                raise ValueError("The checkout is not on a branch (detached HEAD) - choose a release to switch to")
+            logger.info("Update requested. Starting update helper...")
         service = self._systemd_service_name()
-        cmd = [sys.executable, self._paths.update_script, self._paths.app_entrypoint, str(os.getpid())]
+        cmd = [sys.executable, self._paths.update_script]
+        if branch is not None:
+            cmd += ["--branch", branch]
+        cmd += [self._paths.app_entrypoint, str(os.getpid())]
         if service:
             cmd.append(service)
         if os.name == "nt":

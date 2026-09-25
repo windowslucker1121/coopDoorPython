@@ -1224,6 +1224,65 @@
     overlayEl.remove();
     toast('The coop controller did not come back yet - try reloading later.', 'error', 8000);
   }
+
+  // ── releases (git branches) ──
+  function relDate(iso) {
+    const t = Date.parse(iso || '');
+    if (Number.isNaN(t)) return '';
+    const s = Math.round((Date.now() - t) / 1000);
+    if (s < 90) return 'just now';
+    const units = [[60, 'minute'], [24, 'hour'], [30, 'day'], [12, 'month'], [Infinity, 'year']];
+    let v = s / 60;
+    for (let i = 0; i < units.length; i++) {
+      const [n, unit] = units[i];
+      if (v < n || i === units.length - 1) { const r = Math.max(1, Math.round(v)); return `${r} ${unit}${r === 1 ? '' : 's'} ago`; }
+      v /= n;
+    }
+    return '';
+  }
+  const fullDate = (iso) => { const t = Date.parse(iso || ''); return Number.isNaN(t) ? '' : new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
+
+  // Modal branch picker. Resolves with the chosen branch name or null.
+  function pickBranch(res) {
+    const dlg = $('#dialog');
+    const branches = res.branches || [];
+    const row = (b) => `<button type="button" class="branch-opt" data-branch-opt="${esc(b.name)}" data-name="${esc(b.name.toLowerCase())}" ${b.current ? 'disabled aria-disabled="true"' : ''}>
+        <span class="branch-name mono">${esc(b.name)}</span>
+        <span class="branch-tags">${b.stable ? '<span class="chip chip-ok">Stable</span>' : ''}${b.current ? '<span class="chip">Installed</span>' : ''}</span>
+        <span class="branch-sub muted"><span class="mono">${esc(b.commit)}</span> · <time datetime="${esc(b.date)}" title="${esc(fullDate(b.date))}">${esc(relDate(b.date))}</time> · ${esc(b.subject)}</span>
+      </button>`;
+    dlg.innerHTML = `<form method="dialog" class="dlg dlg-branches">
+      <h2>Choose a dev release</h2>
+      <p>Dev releases are work in progress from other branches of the project. They may be unfinished or unstable - you can switch back to stable at any time.</p>
+      ${res.warning ? `<p class="form-msg error" data-branch-warning>${icon('alert', 16, 2.2)} ${esc(res.warning)}</p>` : ''}
+      <div class="field"><label for="branch-filter">Filter branches</label><input class="input" id="branch-filter" type="search" placeholder="Type part of a branch name" autocomplete="off" spellcheck="false" data-branch-filter></div>
+      <div class="branch-list" data-branch-list tabindex="-1">${branches.map(row).join('')}</div>
+      <p class="empty" data-branch-empty ${branches.length ? 'hidden' : ''}>${branches.length ? 'No branch matches the filter.' : 'No branches found.'}</p>
+      <div class="form-actions"><button class="btn" value="cancel" type="submit">Cancel</button></div>
+    </form>`;
+    const filter = $('[data-branch-filter]', dlg);
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      let shown = 0;
+      $$('[data-branch-opt]', dlg).forEach((b) => { const hit = !q || b.dataset.name.includes(q); b.hidden = !hit; if (hit) shown++; });
+      const empty = $('[data-branch-empty]', dlg);
+      empty.textContent = 'No branch matches the filter.';
+      empty.hidden = shown > 0;
+    });
+    filter.addEventListener('keydown', (e) => {   // Enter picks the only / first match
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = $$('[data-branch-opt]', dlg).find((b) => !b.hidden && !b.disabled);
+      if (first) first.click();
+    });
+    $$('[data-branch-opt]', dlg).forEach((b) => b.addEventListener('click', () => dlg.close(`branch:${b.dataset.branchOpt}`)));
+    return new Promise((resolve) => {
+      dlg.addEventListener('close', () => resolve(dlg.returnValue.startsWith('branch:') ? dlg.returnValue.slice(7) : null), { once: true });
+      dlg.returnValue = '';
+      dlg.showModal();
+      if (!matchMedia('(pointer: coarse)').matches) filter.focus(); else $('[data-branch-list]', dlg).focus();
+    });
+  }
   const System = {
     title: 'System & updates',
     render() {
@@ -1261,8 +1320,18 @@
           </section>
           <section class="card" aria-label="Updates">
             <div class="card-head"><h2>Updates &amp; power</h2></div>
-            <p class="muted">Updating downloads the latest version and restarts the controller (about 15 seconds). The door keeps its position.</p>
-            <div class="form-actions"><button class="btn btn-primary" type="button" data-update>Update &amp; restart</button><button class="btn btn-danger" type="button" data-reboot>Restart device</button></div>
+            <div class="release" data-release aria-live="polite">
+              <div class="release-top"><span class="chip" data-channel>Release</span><strong class="mono release-branch" data-branch>Loading…</strong></div>
+              <div class="release-meta muted" data-commit>—</div>
+              <div class="release-status" data-update-status hidden></div>
+            </div>
+            <p class="muted">Updating downloads the latest version of this release and restarts the controller (about 15 seconds). The door keeps its position.</p>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="button" data-update>Update &amp; restart</button>
+              <button class="btn" type="button" data-switch-stable hidden>${icon('check', 18)}Switch to stable</button>
+              <button class="btn" type="button" data-switch-dev>${icon('list', 18)}<span data-switch-dev-label>Switch to dev release</span></button>
+            </div>
+            <div class="form-actions power-actions"><button class="btn btn-danger" type="button" data-reboot>Restart device</button></div>
           </section>
         </div>
         <div class="grid-2">
@@ -1301,8 +1370,69 @@
         btn.textContent = sub ? 'Re-register this device' : 'Enable notifications';
       } catch (e) { el.textContent = 'Get an alert on this device when the door has a problem.'; }
     },
+    showRelease(root, r) {
+      if (!root.isConnected) return;
+      this.release = r;
+      const chip = $('[data-channel]', root), branch = $('[data-branch]', root), meta = $('[data-commit]', root), status = $('[data-update-status]', root);
+      const stable = r.stable_branch || 'main';
+      if (!r.git) {
+        chip.className = 'chip'; chip.textContent = 'Unknown';
+        branch.textContent = 'Not a git checkout';
+        meta.textContent = r.error || 'Release information is unavailable.';
+      } else {
+        const isStable = r.channel === 'stable';
+        chip.className = `chip ${isStable ? 'chip-ok' : 'chip-accent'}`;
+        chip.textContent = isStable ? 'Stable' : 'Dev';
+        branch.textContent = r.detached ? `detached at ${r.commit}` : r.branch;
+        meta.innerHTML = `<span class="mono">${esc(r.commit)}</span>${r.commit_date ? ` · <time datetime="${esc(r.commit_date)}" title="${esc(fullDate(r.commit_date))}">${esc(relDate(r.commit_date))}</time>` : ''}${r.subject ? ` · ${esc(r.subject)}` : ''}`;
+      }
+      let st = '';
+      if (r.git && r.detached) st = `<span class="chip chip-accent">${icon('info', 14, 2.2)}Not on a branch</span> <span class="muted">Choose a release to switch to.</span>`;
+      else if (r.git && !r.upstream) st = `<span class="muted">This branch has no upstream to update from.</span>`;
+      else if (r.behind > 0) st = `<span class="chip chip-accent" data-update-available>${icon('down', 14, 2.2)}Update available</span> <span class="muted">${r.behind} new commit${r.behind === 1 ? '' : 's'} on ${esc(r.upstream)}</span>`;
+      else if (r.behind === 0 && r.checked) st = `<span class="chip chip-ok">${icon('check', 14, 2.2)}Up to date</span>`;
+      if (r.checked === false && r.error && r.git) st += `${st ? ' ' : ''}<span class="muted">${esc(r.error)}</span>`;
+      status.innerHTML = st;
+      status.hidden = !st;
+      const onStable = r.git && !r.detached && r.branch === stable;
+      $('[data-switch-stable]', root).hidden = !r.git || onStable;
+      $('[data-switch-stable]', root).lastChild.textContent = `Switch to stable (${stable})`;
+      $('[data-switch-dev-label]', root).textContent = onStable || !r.git ? 'Switch to dev release' : 'Choose dev release';
+    },
+    async loadRelease(root) {
+      try { this.showRelease(root, await api('/api/update/info')); } catch (e) { this.showRelease(root, { git: false, error: e.message }); return; }
+      // Then ask the controller to check the upstream (a network fetch).
+      try { const r = await api('/api/update/info?check=1'); if (r.git) this.showRelease(root, r); } catch (e) { /* keep the quick answer */ }
+    },
+    async switchRelease(branch, btn) {
+      const stable = (this.release && this.release.stable_branch) || 'main';
+      const toStable = branch === stable;
+      const ok = await confirmDialog(toStable
+        ? { title: 'Switch to the stable release?', body: `The controller installs the latest stable version (<strong class="mono">${esc(branch)}</strong>) and restarts. This page reconnects automatically.`, confirm: 'Switch to stable' }
+        : { title: 'Install a dev release?', body: `The controller switches to the branch <strong class="mono">${esc(branch)}</strong> and restarts.</p><p class="dlg-warn">${icon('alert', 18, 2.2)}<span>Dev releases are work in progress and may be unstable or break the door schedule. Only use them if you know what the branch contains - you can switch back to stable here.</span>`, confirm: 'Install dev release', danger: true });
+      if (!ok) return;
+      try {
+        await busy(btn, () => api('/update', { method: 'POST', body: { branch } }));
+        waitForServer(overlay(toStable ? 'Switching to stable…' : 'Installing dev release…', `Switching to ${branch}. The coop controller is restarting; this page reconnects automatically.`), this.version);
+      } catch (err) { toast(err.message, 'error', 6000); }
+    },
     enter(root) {
       api('/version').then((v) => { $('[data-version]', root).textContent = v.version; this.version = v.version; }).catch(() => {});
+      this.release = null;
+      this.loadRelease(root);
+      $('[data-switch-stable]', root).addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        this.switchRelease((this.release && this.release.stable_branch) || 'main', btn);
+      });
+      $('[data-switch-dev]', root).addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        let res;
+        try { res = await busy(btn, () => api('/api/update/branches')); } catch (err) { toast(`Could not load branches: ${err.message}`, 'error', 6000); return; }
+        if (!root.isConnected) return;
+        if (res.error) { toast(res.error, 'error', 6000); return; }
+        const branch = await pickBranch(res);
+        if (branch && root.isConnected) this.switchRelease(branch, btn);
+      });
       this.loadHealth(root);
       $('[data-health-refresh]', root).addEventListener('click', (e) => busy(e.currentTarget, () => this.loadHealth(root)));
       $$('[data-theme-pref]', root).forEach((b) => b.addEventListener('click', () => {
@@ -1320,7 +1450,9 @@
       });
       $('[data-update]', root).addEventListener('click', async (e) => {
         const btn = e.currentTarget;
-        const ok = await confirmDialog({ title: 'Update and restart?', body: 'The controller downloads the latest version and restarts. This page reconnects automatically.', confirm: 'Update now' });
+        const r = this.release;
+        const what = r && r.branch ? `the latest version of <strong class="mono">${esc(r.branch)}</strong>` : 'the latest version';
+        const ok = await confirmDialog({ title: 'Update and restart?', body: `The controller downloads ${what} and restarts. This page reconnects automatically.`, confirm: 'Update now' });
         if (!ok) return;
         try {
           await busy(btn, () => api('/update', { method: 'POST' }));

@@ -419,3 +419,27 @@ svg.door[data-moving="up"] .arrow-up, svg.door[data-moving="down"] .arrow-down {
 @media (prefers-reduced-motion: reduce) {
   .flash, .live-dot, .sm .sm-edge.hot, .motor-arrow svg { animation: none !important; }
 }
+
+/* releases (System & updates) */
+.release { background: var(--inset); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.release-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.release-branch { font-size: 16px; overflow-wrap: anywhere; min-width: 0; }
+.release-meta { font-size: 14px; overflow-wrap: anywhere; }
+.release-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.release-status .chip { padding: 3px 10px; }
+.power-actions { border-top: 1px solid var(--border); padding-top: 16px; }
+.dlg-branches .field { margin: 0; }
+.branch-list { display: flex; flex-direction: column; border: 1.5px solid var(--border); border-radius: var(--radius-sm); overflow: auto; max-height: min(46vh, 420px); outline: none; }
+.branch-opt { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--border); background: var(--surf); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.branch-opt:last-child { border-bottom: 0; }
+.branch-opt:hover:not(:disabled), .branch-opt:focus-visible { background: var(--inset); outline: none; }
+.branch-opt:focus-visible { box-shadow: inset 3px 0 0 var(--primary); }
+.branch-opt:disabled { cursor: default; opacity: 0.7; }
+.branch-opt[hidden] { display: none; }
+.branch-name { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; min-width: 0; }
+.branch-tags { display: flex; gap: 6px; align-items: flex-start; }
+.branch-tags .chip { padding: 2px 9px; font-size: 12px; }
+.branch-sub { grid-column: 1 / -1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlg p.dlg-warn { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--warn-bg); border: 1.5px solid var(--warn-border); color: var(--warn); font-weight: 600; font-size: 14px; }
+.dlg p.dlg-warn svg { flex-shrink: 0; margin-top: 1px; }
+.dlg .form-msg svg { vertical-align: -3px; }
