@@ -27,3 +27,4 @@ version.txt
 .pytest_cache/
 .coverage
 htmlcov/
+*.tmp

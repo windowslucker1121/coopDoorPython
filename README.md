@@ -43,6 +43,40 @@ $ python3 src/app.py
 
 Now access the webserver with a browser at http://127.0.0.1:5000.
 
+### Trying it without a Raspberry Pi
+
+The controller runs on any computer with simulated hardware (virtual door,
+sensors and camera):
+
+```
+$ echo "use_mock_hardware: true" > config.yaml
+$ python3 src/app.py
+```
+
+Open http://127.0.0.1:5000, run the reference sequence and watch the simulated
+door move. The mock panel (http://127.0.0.1:5000/mock) lets you toggle the
+endstops by hand.
+
+### Command line
+
+Run these from the `src/` directory:
+
+| Command | Purpose |
+|---------|---------|
+| `python -m coop` | run the controller (same as `python src/app.py`) |
+| `python -m coop set-password` | protect the web interface with HTTP Basic auth |
+| `python -m coop disable-auth` | remove the web password |
+| `python -m coop check-config` | validate `config.yaml` |
+
+### Development
+
+```
+$ pip install -r requirements.txt -r requirements-dev.txt
+$ pytest
+```
+
+See [overview.md](overview.md) for the architecture of the `src/coop` package.
+
 **Note:** Sometimes it is necessary to reset CircuitPython after encountering errors like `Unable to set line 21 to input` by running:
 
 ```
@@ -124,9 +158,11 @@ My Raspberry Pi is on a flaky network connection and sometimes it is necessary t
 
 Replace `8.8.8.8` with the IP address of your router if you just want to check local network connectivity.
 
-## Future Improvements
+## Push Notifications
 
-1. Show temperature/humidity plot of last 36 hours
+Door errors and blocked schedule moves are sent as Web Push notifications.
+Create the VAPID keys once with `python3 src/generateVapidPair.py`; they are
+stored in `.secrets.yaml` in the repository root.
 
 Sidenote:
 

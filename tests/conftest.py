@@ -1,163 +1,267 @@
-"""pytest configuration for the coopDoorPython test suite.
+"""Shared fixtures for the coop test suite.
 
-Adds ``src/`` to ``sys.path`` so tests can import project modules without
-installing the package.  The ``clean_state`` fixture runs automatically for
-every test and resets all shared singleton / module-level state so tests
-are fully isolated from each other.
+Nothing here touches real hardware, the network or the host system:
 
-The ``app_module`` / ``app_env`` fixtures give tests access to ``src/app.py``
-(the Flask + Socket.IO application) with every side effect that would touch
-the real machine redirected to a temporary directory or a fake.
+* :class:`DoorRig` — mock GPIO + ``DoorDriver`` + ``DoorController`` on a
+  :class:`~coop.clock.FakeClock`, with helpers to press endstops / switches.
+* ``make_app`` — a fully wired :class:`~coop.application.Application` with
+  injected fakes (mock hardware, fake clock, mock Wi-Fi, recording notifier,
+  system service that never changes the host), rooted in ``tmp_path``.
+* ``client`` / ``sio`` — Flask and Socket.IO test clients for that app.
 """
 
-import sys
-import os
-from unittest import mock
+from __future__ import annotations
 
-# Make src/ importable before any test module is collected
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import os
+import sys
+from dataclasses import replace
+from datetime import datetime
 
 import pytest
+import pytz
 
-import mock_gpio                                   # noqa: E402  (needs src/ on path)
-import door as door_module                         # noqa: E402
-from protected_dict import protected_dict as gv   # noqa: E402
+SRC = os.path.join(os.path.dirname(__file__), "..", "src")
+sys.path.insert(0, os.path.abspath(SRC))
 
+from coop.clock import FakeClock  # noqa: E402
+from coop.config import ConfigStore, Mode, Settings  # noqa: E402
+from coop.door.controller import DoorController  # noqa: E402
+from coop.door.driver import DoorDriver  # noqa: E402
+from coop.door.model import DesiredState, DoorState  # noqa: E402
+from coop.hardware import Hardware  # noqa: E402
+from coop.hardware.camera import MockCamera  # noqa: E402
+from coop.hardware.gpio import MockGpio  # noqa: E402
+from coop.hardware.sensors import Reading, TemperatureSensor  # noqa: E402
+from coop.paths import Paths  # noqa: E402
+from coop.services.sun import SunCalculator  # noqa: E402
+from coop.services.wifi import WifiManager  # noqa: E402
 
-# Module-level configuration globals of door.py.  DOOR.__init__ and the
-# /api/gpio-config endpoint overwrite these, so they are snapshotted once and
-# restored around every test.
-_DOOR_GLOBALS = (
-    "in1", "in2", "ena", "end_up", "end_down", "o_pin", "c_pin",
-    "invert_end_up", "invert_end_down", "referenceSequenceTimeout",
-)
-_DOOR_DEFAULTS = {name: getattr(door_module, name) for name in _DOOR_GLOBALS}
-
-
-def _restore_door_globals():
-    for name, value in _DOOR_DEFAULTS.items():
-        setattr(door_module, name, value)
-
-
-@pytest.fixture(autouse=True)
-def clean_state():
-    """Reset all shared state before (and after) every test.
-
-    * ``mock_gpio.globalPins`` / ``mock_gpio.callbacks`` — cleared so
-      callbacks registered by a previous test's DOOR instance don't fire
-      during the current test.
-    * ``protected_dict._dictionary`` — cleared so no key-value pairs from a
-      previous test leak into the current one.
-    * ``door`` module pin/timeout globals — restored to their defaults.
-    """
-    mock_gpio.MockGPIO.cleanup()
-    gv.reset_for_testing()
-    _restore_door_globals()
-    yield
-    mock_gpio.MockGPIO.cleanup()
-    gv.reset_for_testing()
-    _restore_door_globals()
+DENVER = pytz.timezone("America/Denver")
+REF_MS = 10_000.0
 
 
-# ---------------------------------------------------------------------------
-# app.py fixtures
-# ---------------------------------------------------------------------------
+def at(hour: int, minute: int = 0, day: int = 1, month: int = 6, year: int = 2025) -> datetime:
+    return DENVER.localize(datetime(year, month, day, hour, minute))
 
-class FakeWifiManager:
-    """Stand-in for :class:`wifi_manager.WifiManager` that never shells out."""
+
+# ─────────────────────────────── door rig ───────────────────────────────────
+
+class DoorRig:
+    """Driver + controller on mock GPIO with a fake clock."""
+
+    def __init__(self, tmp_path, *, now: datetime | None = None, mode: Mode = Mode.MANUAL,
+                 reference_ms: float | None = REF_MS, **settings):
+        self.store = ConfigStore(str(tmp_path / "config.yaml"))
+        self.store.load()
+        self.store.update(mode=mode, reference_travel_ms=reference_ms, **settings)
+        self.clock = FakeClock(now or at(12), DENVER)
+        self.gpio = MockGpio()
+        self.pins = self.store.settings.gpio
+        self.driver = DoorDriver(self.gpio, self.pins, self.clock)
+        self.notifications: list[tuple[str, str]] = []
+        self.sun = SunCalculator(self.store.settings.location)
+        self.controller = DoorController(self.driver, self.store, self.clock, lambda: self.sun,
+                                         lambda t, b: self.notifications.append((t, b)))
+
+    # ── time ──
+    def step(self, n: int = 1, advance: float = 0.5) -> None:
+        for _ in range(n):
+            self.controller.step()
+            self.clock.advance(advance)
+
+    def run_for(self, seconds: float, advance: float = 0.5) -> None:
+        self.step(int(seconds / advance), advance)
+
+    # ── inputs ──
+    def upper(self, active: bool = True, edge: bool = True) -> None:
+        (self.gpio.trigger if edge else self.gpio.set_input)(self.pins.endstop_up, active)
+
+    def lower(self, active: bool = True, edge: bool = True) -> None:
+        (self.gpio.trigger if edge else self.gpio.set_input)(self.pins.endstop_down, active)
+
+    def switch(self, position: str | None) -> None:
+        self.gpio.set_input(self.pins.override_open, position == "open")
+        self.gpio.set_input(self.pins.override_close, position == "close")
+
+    # ── observations ──
+    @property
+    def state(self) -> DoorState:
+        return self.driver.state
+
+    @property
+    def desired(self) -> DesiredState:
+        return self.controller.desired
+
+    @property
+    def motor(self) -> tuple[bool, bool, bool]:
+        p = self.pins
+        return (self.gpio.read(p.motor_in1), self.gpio.read(p.motor_in2), self.gpio.read(p.motor_ena))
+
+    def set_mode(self, mode: Mode) -> None:
+        self.store.update(mode=mode)
+
+
+@pytest.fixture
+def rig_factory(tmp_path):
+    def make(**kwargs) -> DoorRig:
+        return DoorRig(tmp_path, **kwargs)
+    return make
+
+
+@pytest.fixture
+def rig(rig_factory) -> DoorRig:
+    return rig_factory()
+
+
+# ─────────────────────────────── application ────────────────────────────────
+
+class FixedSensor(TemperatureSensor):
+    def __init__(self, name="fixed", temperature=None, humidity=None):
+        self.name = name
+        self.reading = Reading(temperature, humidity)
+
+    def read(self) -> Reading:
+        return self.reading
+
+
+class RecordingNotifier:
+    enabled = True
 
     def __init__(self):
-        self.ap_mode = False
-        self.ethernet = False
-        self.connection = {"ssid": "Fake-WiFi"}
-        self.networks = [{"ssid": "Net-A", "signal": 70, "security": "WPA2"}]
-        self.connect_result = True
-        self.start_ap_result = True
-        self.connect_calls = []
-        self.start_ap_calls = []
+        self.sent: list[tuple[str, str]] = []
 
-    def is_ap_mode_active(self):
+    def notify(self, title: str, body: str) -> None:
+        self.sent.append((title, body))
+
+
+class FakeSystem:
+    """SystemService stand-in recording every host-changing action."""
+
+    def __init__(self):
+        self.actions: list[tuple] = []
+        self.version_value = "abc1234"
+        self.fail_time: Exception | None = None
+        self.reboot_error: Exception | None = None
+
+    def uptime(self) -> str:
+        return "1 day(s), 2 hour(s), 3 minute(s), 4 second(s)"
+
+    def metrics(self) -> dict:
+        return {"cpu_percent": 12.34, "ram_used_mb": 512.4, "ram_total_mb": 1024.0, "ram_percent": 50.04,
+                "disk_used_gb": 3.21, "disk_total_gb": 29.87, "disk_percent": 10.75}
+
+    def version(self) -> str:
+        return self.version_value
+
+    def record_git_version(self) -> None:
+        pass
+
+    def set_time(self, value: str) -> None:
+        datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        if self.fail_time:
+            raise self.fail_time
+        self.actions.append(("set_time", value))
+
+    def reboot(self) -> None:
+        if self.reboot_error:
+            raise self.reboot_error
+        self.actions.append(("reboot",))
+
+    def start_update(self) -> None:
+        self.actions.append(("update",))
+
+
+class FakeWifi(WifiManager):
+    def __init__(self):
+        super().__init__(mock=True)
+        self.ap_mode = False
+        self.connect_result = True
+        self.calls: list[tuple] = []
+
+    def is_ap_mode_active(self) -> bool:
         return self.ap_mode
 
-    def is_ethernet_connected(self):
-        return self.ethernet
-
-    def get_current_connection(self):
-        return self.connection
-
-    def scan_networks(self):
-        return self.networks
-
     def connect(self, ssid, password, timeout=30):
-        self.connect_calls.append((ssid, password, timeout))
+        self.calls.append(("connect", ssid, password))
         return self.connect_result
 
-    def start_ap(self, ssid, password):
-        self.start_ap_calls.append((ssid, password))
-        return self.start_ap_result
-
-
-@pytest.fixture(scope="session")
-def app_module():
-    """Import ``src/app.py`` once, without its process-wide side effects.
-
-    * ``gevent.monkey.patch_all`` is replaced by a no-op so the threading /
-      time modules used by the other (thread based) tests stay untouched.
-    * ``subprocess.run`` is stubbed during import so the module-level
-      ``killall libgpiod_pulsein*`` calls never run on the test machine.
-    """
-    import gevent.monkey
-
-    original_patch_all = gevent.monkey.patch_all
-    gevent.monkey.patch_all = lambda *a, **k: None
-    try:
-        with mock.patch("subprocess.run"):
-            import app
-    finally:
-        gevent.monkey.patch_all = original_patch_all
-    return app
+    def start_ap(self, ssid, password, ap_ip="10.42.0.1"):
+        self.calls.append(("start_ap", ssid, password))
+        return True
 
 
 @pytest.fixture
-def app_env(app_module, tmp_path, monkeypatch):
-    """Per-test isolated environment for ``app.py``.
-
-    * ``config.yaml`` / ``log/`` live in ``tmp_path`` (``root_path`` and
-      ``config_filename`` are redirected).
-    * The working directory is ``tmp_path`` (``.subscriptions.json`` and
-      ``version.txt`` are resolved relative to the CWD).
-    * ``wifi_mgr`` is a :class:`FakeWifiManager`.
-    * Location globals, the cached VAPID key and the log buffer are reset.
-    """
-    app = app_module
-    monkeypatch.setattr(app, "root_path", str(tmp_path))
-    monkeypatch.setattr(app, "config_filename", str(tmp_path / "config.yaml"))
-    monkeypatch.chdir(tmp_path)
-    fake_wifi = FakeWifiManager()
-    monkeypatch.setattr(app, "wifi_mgr", fake_wifi)
-    monkeypatch.setattr(app, "vapid_private_key", None)
-    monkeypatch.setattr(app, "boulder", app.boulder)
-    monkeypatch.setattr(app, "timezone", app.timezone)
-    app.log_buffer.clear()
-    app.app.config["TESTING"] = True
-    yield app
-    app.log_buffer.clear()
+def paths(tmp_path) -> Paths:
+    return Paths(str(tmp_path), src_dir=os.path.abspath(SRC))
 
 
 @pytest.fixture
-def fake_wifi(app_env):
-    return app_env.wifi_mgr
+def make_app(paths):
+    from coop.application import Application
+    from coop.logging_setup import LogBuffer
+
+    created = []
+
+    def make(config: dict | None = None, *, now: datetime | None = None, **overrides) -> Application:
+        if config is not None:
+            import ruamel.yaml as YAML
+            with open(paths.config, "w") as f:
+                YAML.YAML().dump(config, f)
+        gpio = MockGpio()
+        hardware = overrides.pop("hardware", None) or Hardware(
+            gpio=gpio,
+            indoor=FixedSensor("indoor", 21.5, 45.25),
+            outdoor=FixedSensor("outdoor", 4.0, 80.0),
+            cpu=FixedSensor("cpu", 51.23),
+            camera_factory=MockCamera,
+        )
+        app = Application(
+            paths,
+            clock=overrides.pop("clock", None) or FakeClock(now or at(12), DENVER),
+            hardware=hardware,
+            wifi=overrides.pop("wifi", None) or FakeWifi(),
+            notifier=overrides.pop("notifier", None) or RecordingNotifier(),
+            system=overrides.pop("system", None) or FakeSystem(),
+            log_buffer=LogBuffer(),
+        )
+        created.append(app)
+        return app
+
+    yield make
+    for app in created:
+        app.stop()
 
 
 @pytest.fixture
-def client(app_env):
-    return app_env.app.test_client()
+def app(make_app):
+    return make_app()
 
 
 @pytest.fixture
-def sio_client(app_env):
-    sc = app_env.socketio.test_client(app_env.app)
-    sc.get_received()  # drain anything sent on connect
+def web(app):
+    from coop.web import create_web
+    flask_app, socketio = create_web(app, async_mode="threading")
+    flask_app.config["TESTING"] = True
+    return flask_app, socketio
+
+
+@pytest.fixture
+def client(web):
+    return web[0].test_client()
+
+
+@pytest.fixture
+def sio(web):
+    flask_app, socketio = web
+    sc = socketio.test_client(flask_app)
+    sc.get_received()
     yield sc
     if sc.is_connected():
         sc.disconnect()
+
+
+def received(sc, event: str) -> list:
+    return [m["args"] for m in sc.get_received() if m["name"] == event]
+
+
+__all__ = ["DoorRig", "at", "DENVER", "REF_MS", "received", "FixedSensor", "Settings", "replace"]
