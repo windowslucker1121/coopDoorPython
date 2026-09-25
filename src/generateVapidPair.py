@@ -9,6 +9,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# The app reads .secrets.yaml / .subscriptions.json from the repository root,
+# so write them there regardless of the current working directory.
+ROOT_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+SECRETS_FILE = os.path.join(ROOT_PATH, ".secrets.yaml")
+SUBSCRIPTIONS_FILE = os.path.join(ROOT_PATH, ".subscriptions.json")
+
 def generate_vapid_keys():
     # Generate a new pair of VAPID keys
     vapid = Vapid()
@@ -31,7 +37,7 @@ def generate_vapid_keys():
     return public_key_b64, private_key_b64
 
 
-def dump_keys_to_yaml(public_key, private_key, filename=".secrets.yaml"):
+def dump_keys_to_yaml(public_key, private_key, filename=SECRETS_FILE):
     # Create the dictionary structure for the YAML file
     secrets = {
         "secrets": {
@@ -50,25 +56,29 @@ def dump_keys_to_yaml(public_key, private_key, filename=".secrets.yaml"):
     logger.info(f"Keys have been successfully written to {filename}")
 
 
-# Generate the keys and prompt for saving
-public_key, private_key = generate_vapid_keys()
+def main():
+    # Generate the keys and prompt for saving
+    public_key, private_key = generate_vapid_keys()
 
-save_keys = input("Do you want to save the keys? THIS WILL ALSO DELETE YOUR NOTIFICATION SUBSCRIPTIONS (y/n): ").strip().lower()
+    save_keys = input("Do you want to save the keys? THIS WILL ALSO DELETE YOUR NOTIFICATION SUBSCRIPTIONS (y/n): ").strip().lower()
+    if save_keys != "y":
+        logger.critical("Keys were not saved, and subscriptions were not deleted.")
+        return
 
-if save_keys == "y":
-    # Check if the old subscriptions file exists
-    subscriptions_file = ".subscriptions.json"
-    if os.path.exists(subscriptions_file):
+    # Delete old subscriptions because they are bound to the old keys
+    if os.path.exists(SUBSCRIPTIONS_FILE):
         try:
-            os.remove(subscriptions_file)
-            # Delete them because the keys have changed
-            logger.info(f"Deleted old subscriptions file: {subscriptions_file}")
+            os.remove(SUBSCRIPTIONS_FILE)
+            logger.info(f"Deleted old subscriptions file: {SUBSCRIPTIONS_FILE}")
         except Exception as e:
             logger.critical(f"Error deleting subscriptions file: {e}")
     else:
-        logger.info(f"No existing subscriptions file found to delete.")
+        logger.info("No existing subscriptions file found to delete.")
 
     # Save the new keys to .secrets.yaml
     dump_keys_to_yaml(public_key, private_key)
-else:
-    logger.critical("Keys were not saved, and subscriptions were not deleted.")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    main()

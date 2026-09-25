@@ -1,5 +1,6 @@
 """Tests for :class:`camera.Camera` (OpenCV webcam wrapper) with a fake ``cv2``."""
 
+import importlib
 import sys
 import types
 from unittest import mock
@@ -14,7 +15,7 @@ def fake_cv2(monkeypatch):
     cv2.imencode = mock.Mock(return_value=(True, mock.Mock(tobytes=lambda: b"jpeg")))
     monkeypatch.setitem(sys.modules, "cv2", cv2)
     import camera
-    return cv2, camera
+    return cv2, importlib.reload(camera)
 
 
 def test_opens_device(fake_cv2):
@@ -34,6 +35,7 @@ def test_unopenable_device_raises_runtime_error(fake_cv2):
 def test_missing_opencv_raises_runtime_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "cv2", None)  # makes `import cv2` fail
     import camera
+    camera = importlib.reload(camera)
     with pytest.raises(RuntimeError, match="OpenCV"):
         camera.Camera()
 
@@ -46,10 +48,8 @@ def test_failed_read_raises_runtime_error(fake_cv2):
         cam.get_frame()
 
 
-@pytest.mark.xfail(strict=True, raises=NameError,
-                   reason="Known bug: cv2 is only imported inside Camera.__init__, "
-                          "so get_frame() cannot see it")
 def test_get_frame_returns_jpeg_bytes(fake_cv2):
+    """Regression: cv2 used to be imported only inside __init__ (NameError here)."""
     cv2, camera = fake_cv2
     cv2.VideoCapture.return_value.read.return_value = (True, "frame")
     cam = camera.Camera()

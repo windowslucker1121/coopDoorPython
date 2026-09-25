@@ -6,6 +6,29 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
+def split_nmcli_terse(line):
+    """Split one line of ``nmcli -t`` output into fields.
+
+    In terse mode nmcli escapes ':' inside values as '\\:' (and '\\' as
+    '\\\\'), so a plain ``split(":")`` breaks SSIDs / connection names
+    that contain a colon.
+    """
+    fields = []
+    current = []
+    chars = iter(line)
+    for ch in chars:
+        if ch == '\\':
+            nxt = next(chars, '')
+            current.append(nxt)
+        elif ch == ':':
+            fields.append(''.join(current))
+            current = []
+        else:
+            current.append(ch)
+    fields.append(''.join(current))
+    return fields
+
 class WifiManager:
     def __init__(self):
         self.is_windows = (os.name == 'nt')
@@ -26,15 +49,17 @@ class WifiManager:
             for line in output.split("\n"):
                 if not line.strip():
                     continue
-                parts = line.split(":")
+                parts = split_nmcli_terse(line)
                 if len(parts) >= 3:
-                    ssid = parts[0].replace("\\:", ":")
-                    if not ssid or ssid in seen or "--" in ssid:
+                    ssid = parts[0]
+                    # nmcli shows hidden networks as "--"; real SSIDs may
+                    # legitimately contain "--".
+                    if not ssid or ssid in seen or ssid == "--":
                         continue
                     seen.add(ssid)
                     try:
                         signal = int(parts[1])
-                    except:
+                    except ValueError:
                         signal = 0
                     networks.append({
                         "ssid": ssid,
@@ -149,20 +174,43 @@ class WifiManager:
             return self._ap_mode_cache
             
         try:
-            cmd = ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"]
-            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
             is_active = False
-            for line in output.split("\n"):
-                if "802-11-wireless" in line and "wlan0" in line:
-                    if "Hotspot" in line or "AP" in line:
-                        is_active = True
-                        break
-            
-            self._ap_mode_cache = is_active
-            self._ap_mode_cache_time = time.time()
-            return is_active
-        except:
-            return False
+            for name in self._active_wlan0_wifi_connections():
+                if self._connection_mode(name) == "ap":
+                    is_active = True
+                    break
+        except Exception as e:
+            logger.debug(f"is_ap_mode_active: {e}")
+            is_active = False
+
+        # Cache failures too, so a broken nmcli is not re-run on every request.
+        self._ap_mode_cache = is_active
+        self._ap_mode_cache_time = time.time()
+        return is_active
+
+    def _active_wlan0_wifi_connections(self):
+        cmd = ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"]
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
+        names = []
+        for line in output.split("\n"):
+            parts = split_nmcli_terse(line)
+            if len(parts) >= 3 and parts[1] == "802-11-wireless" and parts[2] == "wlan0":
+                names.append(parts[0])
+        return names
+
+    def _connection_mode(self, name):
+        """Return the 802-11-wireless.mode of a connection ("ap", "infrastructure", ...).
+
+        The connection *name* is not a reliable indicator (a home network
+        called e.g. "MyAPARTMENT" is not a hotspot), so ask NetworkManager.
+        """
+        try:
+            cmd = ["nmcli", "-g", "802-11-wireless.mode", "connection", "show", name]
+            return subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8").strip().lower()
+        except Exception as e:
+            logger.debug(f"Could not read wireless mode of {name!r}: {e}")
+            # Fallback: nmcli names hotspots it creates "Hotspot".
+            return "ap" if name == "Hotspot" else ""
 
     def is_ethernet_connected(self):
         if self.is_windows:
@@ -171,10 +219,11 @@ class WifiManager:
             cmd = ["nmcli", "-t", "-f", "TYPE,STATE", "device"]
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
             for line in output.split("\n"):
-                if "ethernet:connected" in line:
+                parts = split_nmcli_terse(line)
+                if len(parts) >= 2 and parts[0] == "ethernet" and parts[1] == "connected":
                     return True
             return False
-        except:
+        except Exception:
             return False
 
     def get_current_connection(self):
@@ -184,11 +233,10 @@ class WifiManager:
             cmd = ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"]
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5).decode("utf-8")
             for line in output.split("\n"):
-                if "wireless" in line or "802-11-wireless" in line:
-                    parts = line.split(":")
-                    if len(parts) >= 3 and parts[2] == "wlan0":
-                        return {"ssid": parts[0]}
+                parts = split_nmcli_terse(line)
+                if len(parts) >= 3 and parts[1] == "802-11-wireless" and parts[2] == "wlan0":
+                    return {"ssid": parts[0]}
             return None
-        except:
+        except Exception:
             return None
 

@@ -66,7 +66,7 @@ def test_version_unknown_without_file(client):
     assert client.get("/version").get_json() == {"version": "unknown"}
 
 
-def test_version_reads_version_txt_from_cwd(client, tmp_path):
+def test_version_reads_version_txt_from_root_path(client, tmp_path):
     (tmp_path / "version.txt").write_text("abc1234\n")
     assert client.get("/version").get_json() == {"version": "abc1234"}
 
@@ -81,11 +81,11 @@ def test_subscribe_creates_and_appends(client, tmp_path):
     assert saved == {"subscriptions": [{"endpoint": "a"}, {"endpoint": "b"}]}
 
 
-def test_subscribe_does_not_deduplicate(client, tmp_path):
-    client.post("/subscribe", json={"endpoint": "a"})
-    client.post("/subscribe", json={"endpoint": "a"})
+def test_subscribe_replaces_same_endpoint(client, tmp_path):
+    client.post("/subscribe", json={"endpoint": "a", "keys": {"v": 1}})
+    client.post("/subscribe", json={"endpoint": "a", "keys": {"v": 2}})
     saved = json.loads((tmp_path / ".subscriptions.json").read_text())
-    assert len(saved["subscriptions"]) == 2
+    assert saved["subscriptions"] == [{"endpoint": "a", "keys": {"v": 2}}]
 
 
 # ── captive portal ───────────────────────────────────────────────────────────
@@ -129,8 +129,7 @@ class TestCaptivePortal:
     def test_android_probes_redirect(self, client, path):
         resp = client.get(path)
         assert resp.status_code == 302
-        # The first registered handler (without trailing slash) wins
-        assert resp.headers["Location"] == "http://10.42.0.1"
+        assert resp.headers["Location"] == "http://10.42.0.1/"
 
     @pytest.mark.parametrize("path", ["/hotspot-detect.html", "/success.html"])
     def test_apple_probes_return_meta_refresh(self, client, path):
@@ -327,7 +326,7 @@ class TestWifiApi:
     def test_post_config(self, app_env, client, tmp_path):
         app_env.load_config()
         resp = client.post("/api/wifi-config", json={
-            "ssid": "Home", "password": 1234, "ap_ssid": "AP", "ap_password": "x", "timeout": "30",
+            "ssid": "Home", "password": 1234, "ap_ssid": "AP", "ap_password": "x" * 8, "timeout": "30",
             "ap_ip": "1.2.3.4",  # not accepted via this endpoint
         })
         assert resp.status_code == 200
@@ -359,13 +358,9 @@ class TestWifiApi:
     def test_connect_requires_ssid(self, client):
         assert client.post("/api/wifi-connect", json={"password": "x"}).status_code == 400
 
-    def test_connect_without_body_is_a_server_error(self, app_env, client):
-        # Quirk: a missing JSON body is not validated (None.get → 500).
-        app_env.app.config["TESTING"] = False
-        try:
-            assert client.post("/api/wifi-connect").status_code == 500
-        finally:
-            app_env.app.config["TESTING"] = True
+    def test_connect_without_body_is_rejected(self, client, fake_wifi):
+        assert client.post("/api/wifi-connect").status_code == 400
+        assert fake_wifi.connect_calls == []
 
 
 # ── system time ──────────────────────────────────────────────────────────────

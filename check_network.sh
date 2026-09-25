@@ -20,17 +20,32 @@ log() {
     echo "$(date +'%Y-%m-%d %H:%M:%S') - $1" >>$LOG_FILE 2>>$LOG_FILE
 }
 
+# True (exit 0) if an active connection on wlan0 runs in access-point mode.
+# The connection *name* is not checked: a normal network may well be called
+# e.g. "MyAPARTMENT", which must not suppress the network watchdog.
+is_hotspot_active() {
+  nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | {
+    while IFS= read -r line; do
+      dev="${line##*:}"
+      name="${line%:*}"
+      name="${name//\\:/:}"
+      [ "$dev" = "wlan0" ] || continue
+      if [ "$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null)" = "ap" ]; then
+        exit 0
+      fi
+    done
+    exit 1
+  }
+}
+
 log "Starting up. Checking network via $PING_IP."
 disconnect_time=0
 while true; do
-  # Skip reboot/restart if AP mode or hotspot is active
-  if nmcli -t -f TYPE connection show --active 2>/dev/null | grep -q "802-11-wireless"; then
-      # If Hotspot is the active connection, consider we are in fallback mode
-      if nmcli -t -f NAME connection show --active | grep -Eqi "Hotspot|AP"; then
-          disconnect_time=0
-          sleep $CONNECTIVITY_CHECK_INTERVAL
-          continue
-      fi
+  # Skip reboot/restart while the fallback hotspot (AP mode) is active
+  if is_hotspot_active; then
+      disconnect_time=0
+      sleep $CONNECTIVITY_CHECK_INTERVAL
+      continue
   fi
 
   if ping -c 1 $PING_IP >/dev/null; then

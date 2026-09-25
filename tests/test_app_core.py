@@ -94,7 +94,7 @@ class TestConfig:
             "use_mock_hardware", "auto_mode", "timer_mode", "timer_open_time",
             "timer_close_time", "sunrise_offset", "sunset_offset", "location",
             "consoleLogToFile", "csvLog", "enable_camera", "camera_index",
-            "outdoor_sensor_type", "gpio", "wifi",
+            "outdoor_sensor_type", "gpio", "wifi", "reference_door_endstops_ms",
         }
 
     def test_save_load_round_trip(self, app_env):
@@ -362,7 +362,7 @@ class TestDataTasks:
         with pytest.raises(StopLoop):
             app_env.data_log_task()
         lines = open(app_env.get_log_file_name()).read().splitlines()
-        assert lines == ["# time, temp_in", "t, 1.0°C", "t, 1.0°C"]
+        assert lines == ["# time, temp_in", "t,1.0°C", "t,1.0°C"]
 
     def test_data_log_task_appends_to_existing_file(self, app_env, monkeypatch):
         os.makedirs(os.path.dirname(app_env.get_log_file_name()), exist_ok=True)
@@ -406,13 +406,11 @@ class TestCameraTask:
         monkeypatch.setattr(app_env, "Camera", cam_cls)
         app_env.camera_task()  # returns instead of looping forever
 
-    def test_camera_none_setting_is_treated_as_enabled(self, app_env, monkeypatch):
-        # Quirk: only an explicit False disables the camera.
+    def test_camera_unset_setting_is_treated_as_disabled(self, app_env, monkeypatch):
         cam_cls = mock.Mock()
-        cam_cls.return_value.get_frame.side_effect = RuntimeError
         monkeypatch.setattr(app_env, "Camera", cam_cls)
         app_env.camera_task()
-        cam_cls.assert_called_once()
+        cam_cls.assert_not_called()
 
 
 # ── wifi watchdog ────────────────────────────────────────────────────────────

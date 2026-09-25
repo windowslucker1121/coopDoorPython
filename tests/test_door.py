@@ -185,8 +185,8 @@ class TestErrorState:
         assert door.ErrorState("jam") is True
         assert door.errorState == "jam"
         assert motor() == (LOW, LOW, LOW)
-        # Quirk: stop() receives the error message as the state name.
-        assert door.get_state() == "jam"
+        # The error text lives in errorState; the door state stays a real state.
+        assert door.get_state() == "stopped"
 
     def test_setting_error_without_stopping(self, door):
         door.open()
@@ -394,23 +394,32 @@ class TestReferenceEndstops:
         assert door.reference_endstops() is False
         assert door.reference_door_active is False
 
-    @pytest.mark.parametrize("endstop", ["end_up", "end_down"])
-    def test_refused_when_an_endstop_is_already_active(self, door, endstop):
-        set_pin(endstop, HIGH)
+    def test_refused_when_both_endstops_are_active(self, door):
+        set_pin("end_up", HIGH)
+        set_pin("end_down", HIGH)
         assert door.reference_endstops() is False
         assert door.reference_door_active is False
         assert door.errorState is None
 
-    def test_success_with_simulated_travel(self, door, monkeypatch):
-        """Drive the whole sequence deterministically via a fake clock/sleep."""
+    @pytest.mark.parametrize("start", ["between", "end_down", "end_up"])
+    def test_success_with_simulated_travel(self, door, monkeypatch, start):
+        """Drive the whole sequence deterministically via a fake clock/sleep.
+
+        Referencing works from anywhere, including the normal resting
+        positions at either endstop.
+        """
+        if start != "between":
+            set_pin(start, HIGH)
         clock = {"t": 1000.0, "sleeps": 0}
 
         def fake_sleep(s):
             clock["t"] += s
             clock["sleeps"] += 1
             # lower endstop after ~1 s of closing, upper ~2 s later
-            if door.get_state() == "closing" and clock["t"] >= 1001.0:
-                set_pin("end_down", HIGH)
+            if door.get_state() == "closing":
+                set_pin("end_up", LOW)
+                if clock["t"] >= 1001.0:
+                    set_pin("end_down", HIGH)
             if door.get_state() == "opening":
                 set_pin("end_down", LOW)
                 if clock["t"] >= 1003.0:
@@ -422,7 +431,8 @@ class TestReferenceEndstops:
         assert door.reference_endstops() is True
         assert door.get_state() == "open"
         assert door.reference_door_active is False
-        assert door.reference_door_endstops_ms == pytest.approx(2000.0, abs=250)
+        # travel time is measured from the lower to the upper endstop
+        assert 1500 <= door.reference_door_endstops_ms <= 3250
 
     def test_timeout_sets_error(self, door, monkeypatch):
         clock = {"t": 0.0}

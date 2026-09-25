@@ -56,16 +56,18 @@ def test_scan_parses_dedupes_and_sorts(mgr, check_output):
         b"Home:40:WPA2\n"
         b"Office:90:WPA2 WPA3\n"
         b"Home:70:WPA2\n"      # duplicate SSID → first entry kept
-        b":55:WPA2\n"           # hidden network → skipped
-        b"Weird--Net:80:\n"     # '--' in SSID → skipped
-        b"Cafe:n/a:\n"          # non-numeric signal → 0
+        b":55:WPA2\n"           # empty SSID → skipped
+        b"--:50:WPA2\n"         # nmcli placeholder for hidden network → skipped
+        b"Weird--Net:80:\n"     # '--' inside a real SSID is kept
+        b"Caf\\:e:n/a:\n"       # escaped colon in SSID, non-numeric signal → 0
         b"\n"
     )
     nets = mgr.scan_networks()
     assert nets == [
         {"ssid": "Office", "signal": 90, "security": "WPA2 WPA3"},
+        {"ssid": "Weird--Net", "signal": 80, "security": ""},
         {"ssid": "Home", "signal": 40, "security": "WPA2"},
-        {"ssid": "Cafe", "signal": 0, "security": ""},
+        {"ssid": "Caf:e", "signal": 0, "security": ""},
     ]
     assert check_output.call_args[0][0] == ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"]
 
@@ -144,34 +146,66 @@ def test_start_ap_failures_return_false(mgr, check_output, run, exc):
 
 # ── is_ap_mode_active ────────────────────────────────────────────────────────
 
+def fake_nmcli(active, modes):
+    """check_output fake: *active* is the terse active-connection listing,
+    *modes* maps connection name → 802-11-wireless.mode."""
+    def _check_output(cmd, **kw):
+        if cmd[:2] == ["nmcli", "-g"]:
+            name = cmd[-1]
+            if name not in modes:
+                raise subprocess.CalledProcessError(10, cmd)
+            return (modes[name] + "\n").encode()
+        return active.encode()
+    return _check_output
+
+
 def test_ap_mode_detected_and_cached(mgr, check_output, monkeypatch):
     now = {"t": 1000.0}
     monkeypatch.setattr(wm.time, "time", lambda: now["t"])
-    check_output.return_value = b"Hotspot:802-11-wireless:wlan0\n"
+    check_output.side_effect = fake_nmcli("Hotspot:802-11-wireless:wlan0\n", {"Hotspot": "ap"})
 
     assert mgr.is_ap_mode_active() is True
-    check_output.return_value = b""
+    calls = check_output.call_count
+    check_output.side_effect = fake_nmcli("", {})
     now["t"] += 29
     assert mgr.is_ap_mode_active() is True  # cached for 30 s
-    assert check_output.call_count == 1
+    assert check_output.call_count == calls
     now["t"] += 2
     assert mgr.is_ap_mode_active() is False
-    assert check_output.call_count == 2
+
+
+def test_ap_mode_uses_wireless_mode_not_name(mgr, check_output):
+    # Regression: any connection *named* like "...AP..." used to count as AP.
+    check_output.side_effect = fake_nmcli(
+        "MyAPARTMENT-5G:802-11-wireless:wlan0\n", {"MyAPARTMENT-5G": "infrastructure"})
+    assert mgr.is_ap_mode_active() is False
+
+
+def test_ap_mode_custom_hotspot_name(mgr, check_output):
+    check_output.side_effect = fake_nmcli("Coop\\:AP:802-11-wireless:wlan0\n", {"Coop:AP": "ap"})
+    assert mgr.is_ap_mode_active() is True
+
+
+def test_ap_mode_falls_back_to_hotspot_name_when_mode_unreadable(mgr, check_output):
+    check_output.side_effect = fake_nmcli("Hotspot:802-11-wireless:wlan0\n", {})
+    assert mgr.is_ap_mode_active() is True
 
 
 def test_ap_mode_requires_wlan0(mgr, check_output):
-    check_output.return_value = b"Hotspot:802-11-wireless:wlan1\n"
+    check_output.side_effect = fake_nmcli("Hotspot:802-11-wireless:wlan1\n", {"Hotspot": "ap"})
     assert mgr.is_ap_mode_active() is False
 
 
 def test_ap_mode_regular_wifi_is_not_ap(mgr, check_output):
-    check_output.return_value = b"HomeNet:802-11-wireless:wlan0\n"
+    check_output.side_effect = fake_nmcli("HomeNet:802-11-wireless:wlan0\n", {"HomeNet": "infrastructure"})
     assert mgr.is_ap_mode_active() is False
 
 
-def test_ap_mode_error_returns_false(mgr, check_output):
+def test_ap_mode_error_returns_false_and_is_cached(mgr, check_output):
     check_output.side_effect = OSError
     assert mgr.is_ap_mode_active() is False
+    assert mgr.is_ap_mode_active() is False
+    assert check_output.call_count == 1
 
 
 # ── ethernet / current connection ────────────────────────────────────────────
@@ -186,8 +220,12 @@ def test_ethernet_connected(mgr, check_output):
 
 
 def test_current_connection(mgr, check_output):
-    check_output.return_value = b"Wired:802-3-ethernet:eth0\nHomeNet:802-11-wireless:wlan0\n"
-    assert mgr.get_current_connection() == {"ssid": "HomeNet"}
+    check_output.return_value = b"Wired:802-3-ethernet:eth0\nHome\\:Net:802-11-wireless:wlan0\n"
+    assert mgr.get_current_connection() == {"ssid": "Home:Net"}
+
+
+def test_split_nmcli_terse():
+    assert wm.split_nmcli_terse("a\\:b:c\\\\d:") == ["a:b", "c\\d", ""]
 
 
 def test_current_connection_none(mgr, check_output):

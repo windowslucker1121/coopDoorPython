@@ -40,16 +40,29 @@ class DoorTaskRunner:
         Callable ``(title: str, body: str)`` that delivers a Web Push
         notification.  Injected so tests can capture calls without
         touching the network.
+    on_reference_complete:
+        Optional callable ``(reference_ms: float)`` invoked after a
+        successful reference sequence (``app.py`` uses it to persist the
+        travel time to ``config.yaml``).
     """
 
     DOOR_MOVE_MAX_AFTER_ENDSTOPS = 20
     PREMATURE_CLOSE_THRESHOLD = 0.8  # require ≥80 % of reference travel time
 
-    def __init__(self, door, get_sunrise_sunset, get_current_time, send_notification):
+    def __init__(self, door, get_sunrise_sunset, get_current_time, send_notification,
+                 on_reference_complete=None):
         self.door = door
         self._get_sunrise_sunset = get_sunrise_sunset
         self._get_current_time = get_current_time
         self._send_notification = send_notification
+        self._on_reference_complete = on_reference_complete
+
+        # Restore a previously measured (persisted) travel time so the motor
+        # budget and auto/timer modes work right after a restart.
+        if door.reference_door_endstops_ms is None:
+            stored_ref = global_vars.instance().get_value("reference_door_endstops_ms")
+            if isinstance(stored_ref, (int, float)) and stored_ref > 0:
+                door.reference_door_endstops_ms = stored_ref
 
         # --- Per-iteration mutable state (mirrors door_task local vars) ---
         self.door_move_count = 0
@@ -83,6 +96,14 @@ class DoorTaskRunner:
         # manual override switch blocks an auto-mode door command.
         # Reset automatically whenever the override switch is inactive.
         self.sentOverrideNotification = False
+
+        # Schedule re-synchronisation.  On boot (first_iter), when auto/timer
+        # mode is switched on, and after an error is cleared, the door is
+        # driven to the position the schedule expects *right now* instead of
+        # waiting for the next open/close window.
+        self._resync_schedule = False
+        self._prev_schedule_mode = None
+        self._last_timer_parse_error = None
 
         # Door position estimate (0.0 = fully closed, 1.0 = fully open).
         # Authoritative at endstops; integrated from elapsed time otherwise.
@@ -132,6 +153,7 @@ class DoorTaskRunner:
             self.auto_close_retry_time = None
             self._close_retry_just_fired = False
             self.auto_close_cumulative_drive_s = 0.0
+            self._resync_schedule = True
 
         if toogle_reference_of_endstops:
             logger.info("Referencing door endstops, waiting for completion.")
@@ -149,6 +171,11 @@ class DoorTaskRunner:
             global_vars.instance().set_value(
                 "reference_door_endstops_ms", door.reference_door_endstops_ms
             )
+            if self._on_reference_complete is not None:
+                try:
+                    self._on_reference_complete(door.reference_door_endstops_ms)
+                except Exception as e:
+                    logger.error("Persisting reference travel time failed: %s", e)
             logger.info(
                 "Reference Sequence Successfull with total time: %s milliseconds",
                 door.reference_door_endstops_ms,
@@ -183,6 +210,12 @@ class DoorTaskRunner:
             auto_mode = auto_mode == "True"
             timer_mode = timer_mode == "True"
             door.set_auto_mode(auto_mode or timer_mode)
+
+            schedule_mode = "auto" if auto_mode else ("timer" if timer_mode else None)
+            if schedule_mode is not None and schedule_mode != self._prev_schedule_mode:
+                self._resync_schedule = True
+            self._prev_schedule_mode = schedule_mode
+            sync_now = self.first_iter or self._resync_schedule
 
             # ------------------------------------------------------------------
             # ErrorState short-circuit.
@@ -231,15 +264,6 @@ class DoorTaskRunner:
                 )
                 return True
 
-            if d_door_state != self.last_d_door_state:
-                if self.last_d_door_state is not None:
-                    if auto_mode and not self.door_override:
-                        logger.info(f"[Auto Mode] System changing desired door state from {self.last_d_door_state.upper()} to {d_door_state.upper()}.")
-                    elif timer_mode and not self.door_override:
-                        logger.info(f"[Timer Mode] System changing desired door state from {self.last_d_door_state.upper()} to {d_door_state.upper()}.")
-                self.door_move_count = 0
-                self.last_d_door_state = d_door_state
-
             # If we are in auto mode then open or close the door based on
             # sunrise / sunset times.
             if auto_mode and not self.door_override:
@@ -259,13 +283,14 @@ class DoorTaskRunner:
                     current_time = self._get_current_time()
                     time_window = timedelta(minutes=1)
 
-                    # If we just booted up, make sure the door is in the
-                    # correct position.
-                    if self.first_iter and not self.auto_close_retry_pending:
-                        if current_time >= open_time and current_time < close_time:
+                    # On boot / mode activation / error clear, make sure the
+                    # door is in the position the schedule expects.
+                    if sync_now and not self.auto_close_retry_pending:
+                        if self._in_open_period(current_time, open_time, close_time):
                             global_vars.instance().set_value("desired_door_state", "open")
                         else:
                             global_vars.instance().set_value("desired_door_state", "closed")
+                        self._resync_schedule = False
 
                     # If we are in the 1 minute after sunrise, command open.
                     if current_time >= open_time and current_time <= open_time + time_window:
@@ -298,7 +323,7 @@ class DoorTaskRunner:
                     current_time = self._get_current_time()
                     time_window = timedelta(minutes=1)
                     window_active = (
-                        self.first_iter
+                        sync_now
                         or (current_time >= open_time and current_time <= open_time + time_window)
                         or (current_time >= close_time and current_time <= close_time + time_window)
                     )
@@ -324,26 +349,18 @@ class DoorTaskRunner:
                     global_vars.instance().set_value("timer_mode", "False")
                 else:
                     current_time = self._get_current_time()
-                    try:
-                        open_dt = datetime.strptime(timer_open_time, "%H:%M").time()
-                        close_dt = datetime.strptime(timer_close_time, "%H:%M").time()
-                        open_time = datetime.combine(current_time.date(), open_dt)
-                        open_time = current_time.tzinfo.localize(open_time) if current_time.tzinfo else open_time
-                        
-                        close_time = datetime.combine(current_time.date(), close_dt)
-                        close_time = current_time.tzinfo.localize(close_time) if current_time.tzinfo else close_time
-                    except Exception as e:
-                        logger.error(f"Error parsing timer times: {e}")
-                        open_time = current_time
-                        close_time = current_time
-                    
+                    open_time, close_time = self._timer_times(
+                        current_time, timer_open_time, timer_close_time
+                    )
+
                     time_window = timedelta(minutes=1)
 
-                    if self.first_iter and not self.auto_close_retry_pending:
-                        if current_time >= open_time and current_time < close_time:
+                    if sync_now and not self.auto_close_retry_pending:
+                        if self._in_open_period(current_time, open_time, close_time):
                             global_vars.instance().set_value("desired_door_state", "open")
                         else:
                             global_vars.instance().set_value("desired_door_state", "closed")
+                        self._resync_schedule = False
 
                     if current_time >= open_time and current_time <= open_time + time_window:
                         global_vars.instance().set_value("desired_door_state", "open")
@@ -357,21 +374,13 @@ class DoorTaskRunner:
 
             elif timer_mode and self.door_override:
                 current_time = self._get_current_time()
-                try:
-                    open_dt = datetime.strptime(timer_open_time, "%H:%M").time()
-                    close_dt = datetime.strptime(timer_close_time, "%H:%M").time()
-                    open_time = datetime.combine(current_time.date(), open_dt)
-                    open_time = current_time.tzinfo.localize(open_time) if current_time.tzinfo else open_time
-                    
-                    close_time = datetime.combine(current_time.date(), close_dt)
-                    close_time = current_time.tzinfo.localize(close_time) if current_time.tzinfo else close_time
-                except:
-                    open_time = current_time
-                    close_time = current_time
+                open_time, close_time = self._timer_times(
+                    current_time, timer_open_time, timer_close_time
+                )
 
                 time_window = timedelta(minutes=1)
                 window_active = (
-                    self.first_iter
+                    sync_now
                     or (current_time >= open_time and current_time <= open_time + time_window)
                     or (current_time >= close_time and current_time <= close_time + time_window)
                 )
@@ -386,6 +395,22 @@ class DoorTaskRunner:
                         "during movement window."
                     )
                     self.sentOverrideNotification = True
+
+            # The mode blocks above may have changed the desired state; use the
+            # current value for the rest of this iteration.  (Using the value
+            # read at the top of the step made the drive block act on a stale
+            # desired state — e.g. at boot the "stopped" reconcile below
+            # overwrote the schedule's "closed" with the door's "open".)
+            d_door_state = global_vars.instance().get_value("desired_door_state")
+
+            if d_door_state != self.last_d_door_state:
+                if self.last_d_door_state is not None:
+                    if auto_mode and not self.door_override:
+                        logger.info(f"[Auto Mode] System changing desired door state from {str(self.last_d_door_state).upper()} to {str(d_door_state).upper()}.")
+                    elif timer_mode and not self.door_override:
+                        logger.info(f"[Timer Mode] System changing desired door state from {str(self.last_d_door_state).upper()} to {str(d_door_state).upper()}.")
+                self.door_move_count = 0
+                self.last_d_door_state = d_door_state
 
             # Poll endstops every iteration as a reliable safety-net.
             # Edge-detect callbacks can be missed (bounce, gevent blocking,
@@ -626,11 +651,14 @@ class DoorTaskRunner:
                                 )
                                 self.door_move_count = 0
                         case _:
+                            logger.error("Unknown desired door state: %r", d_door_state)
                             door.ErrorState(
-                                "unknown state - i dont know how this could happen"
+                                f"Unknown desired door state: {d_door_state!r}"
+                            )
+                            global_vars.instance().set_value(
+                                "desired_door_state", "stopped"
                             )
                             self.door_move_count = 0
-                            assert False, "Unknown state: " + str(d_door_state)
 
             # We are not in switch override and the door is in the desired
             # state.  Make sure the motor is off.
@@ -684,3 +712,50 @@ class DoorTaskRunner:
             )
 
         return True
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _in_open_period(current_time, open_time, close_time) -> bool:
+        """True if the door should be open at *current_time*.
+
+        Handles schedules that wrap past midnight (``close_time`` earlier in
+        the day than ``open_time``).  Identical times mean "never open".
+        """
+        if open_time < close_time:
+            return open_time <= current_time < close_time
+        if open_time > close_time:
+            return current_time >= open_time or current_time < close_time
+        return False
+
+    @staticmethod
+    def _localize(current_time, naive):
+        tz = current_time.tzinfo
+        if tz is None:
+            return naive
+        if hasattr(tz, "localize"):  # pytz
+            return tz.localize(naive)
+        return naive.replace(tzinfo=tz)
+
+    def _timer_times(self, current_time, timer_open_time, timer_close_time):
+        """Today's timer open/close datetimes in *current_time*'s timezone.
+
+        Unparseable times fall back to ``(current_time, current_time)``
+        (i.e. "closed"); the error is logged once per distinct bad value.
+        """
+        try:
+            open_dt = datetime.strptime(timer_open_time, "%H:%M").time()
+            close_dt = datetime.strptime(timer_close_time, "%H:%M").time()
+        except (TypeError, ValueError) as e:
+            key = (timer_open_time, timer_close_time)
+            if key != self._last_timer_parse_error:
+                logger.error(f"Error parsing timer times: {e}")
+                self._last_timer_parse_error = key
+            return current_time, current_time
+        self._last_timer_parse_error = None
+        return (
+            self._localize(current_time, datetime.combine(current_time.date(), open_dt)),
+            self._localize(current_time, datetime.combine(current_time.date(), close_dt)),
+        )

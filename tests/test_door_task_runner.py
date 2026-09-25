@@ -116,7 +116,8 @@ def test_error_state_short_circuit_commits_state_and_notifies_once():
 
 def test_failed_reference_returns_false_and_clears_toggle():
     h = Harness(toggle_reference_of_endstops=True)
-    set_pin("end_up", MockGPIO.HIGH)  # already at an endstop → refused
+    set_pin("end_up", MockGPIO.HIGH)  # both endstops active → wiring fault → refused
+    set_pin("end_down", MockGPIO.HIGH)
     assert h.step() is False
     assert gvals("toggle_reference_of_endstops") == [False]
 
@@ -138,10 +139,7 @@ def test_auto_mode_first_iteration_sets_desired_state(now, expected):
     h = Harness(auto_mode="True", now=now)
     h.step()
     assert gvals("desired_door_state") == [expected]
-    # The drive block uses the desired state read at the *start* of the
-    # iteration, so the motor only starts on the following step.
-    assert h.door.get_state() == "stopped"
-    h.step()
+    # The motor reacts in the same step the schedule decides.
     assert h.door.get_state() == ("opening" if expected == "open" else "closing")
 
 
@@ -310,11 +308,12 @@ def test_without_reference_default_budget_is_used():
     assert gvals("desired_door_state") == ["stopped"]
 
 
-def test_unknown_desired_state_raises_and_sets_error():
+def test_unknown_desired_state_sets_error_without_crashing():
     h = Harness(desired_door_state="sideways")
-    with pytest.raises(AssertionError):
-        h.step()
-    assert "unknown state" in h.door.errorState
+    assert h.step() is True
+    assert "sideways" in h.door.errorState
+    assert gvals("desired_door_state") == ["stopped"]
+    assert MockGPIO.input(door_module.ena) == MockGPIO.LOW
 
 
 # ── state commit & position estimate ─────────────────────────────────────────

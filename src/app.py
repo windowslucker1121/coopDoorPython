@@ -35,6 +35,7 @@ import logging
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 import glob
 import sys
+import csv
 import base64
 from pywebpush import webpush, WebPushException
 import atexit
@@ -124,15 +125,6 @@ def get_allowed_hosts():
     # de-duplicate
     return list({*hosts, *defaults})
 
-@app.route("/generate_204")
-def android_generate_204():
-    return redirect(get_ap_base_url(), code=302)
-
-@app.route("/gen_204")
-def android_gen_204():
-    return redirect(get_ap_base_url(), code=302)
-
-
 @app.before_request
 def check_captive_portal():
     # do not interfere with static and API
@@ -216,14 +208,18 @@ boulder = LocationInfo("Boulder", "USA", "America/Denver", 40.01499, -105.27055)
 timezone = pytz.timezone('America/Denver')
 
 def get_sunrise_and_sunset():
-    # Get the sunrise and sunset times for today
-    s = sun(boulder.observer, date=date.today(), tzinfo=boulder.timezone)
+    # Sunrise / sunset for *today at the configured location* (the system
+    # date can differ from the location's date near midnight).
+    s = sun(boulder.observer, date=get_current_time().date(), tzinfo=boulder.timezone)
 
     # Convert sunrise and sunset to the desired timezone (e.g., 'America/Denver')
     return s["sunrise"].astimezone(timezone), s["sunset"].astimezone(timezone)
 
 def get_current_time():
-    return timezone.localize(datetime.now())
+    # Current wall-clock time in the configured location's timezone.
+    # (localize(datetime.now()) would label the *system* local time with the
+    # location's zone, which is wrong whenever the Pi's timezone differs.)
+    return datetime.now(timezone)
 
 root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 config_filename = os.path.join(root_path, "config.yaml")
@@ -256,8 +252,11 @@ WIFI_DEFAULTS = {
 }
 
 def save_config():
+    # Write to a temporary file and atomically replace config.yaml so a power
+    # cut in the middle of a write cannot leave a truncated/corrupt config.
     with config_lock:
-        with open(config_filename, 'w') as file:
+        tmp_filename = config_filename + ".tmp"
+        with open(tmp_filename, 'w') as file:
             yaml = YAML.YAML()
             to_dump = {
                 "use_mock_hardware": global_vars.instance().get_value("use_mock_hardware"),
@@ -275,8 +274,12 @@ def save_config():
                 "outdoor_sensor_type": global_vars.instance().get_value("outdoor_sensor_type"),
                 "gpio": global_vars.instance().get_value("gpio"),
                 "wifi": global_vars.instance().get_value("wifi"),
+                "reference_door_endstops_ms": global_vars.instance().get_value("reference_door_endstops_ms"),
             }
             yaml.dump(to_dump, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp_filename, config_filename)
 
 def load_config():
     saveNewConfig = False
@@ -305,12 +308,19 @@ def load_config():
             "outdoor_sensor_type": "dht22",
             "gpio": dict(GPIO_DEFAULTS),
             "wifi": dict(WIFI_DEFAULTS),
+            # Measured closed→open travel time (ms); None until referenced.
+            "reference_door_endstops_ms": None,
         }
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as file:
                 yaml = YAML.YAML()
                 content = file.read()
                 yaml_config = yaml.load(content)
+                if not isinstance(yaml_config, dict):
+                    # Empty or corrupt file: fall back to defaults and rewrite it.
+                    logger.error("config.yaml is empty or invalid - using defaults.")
+                    yaml_config = {}
+                    saveNewConfig = True
                 # Merge gpio sub-dict with defaults so missing keys fall back gracefully
                 if "gpio" in yaml_config and isinstance(yaml_config["gpio"], dict):
                     merged_gpio = dict(GPIO_DEFAULTS)
@@ -331,7 +341,15 @@ def load_config():
         save_config()
 
 
+_valid_locations_cache = None
+
 def get_valid_locations() -> list:
+    global _valid_locations_cache
+    if _valid_locations_cache is None:
+        _valid_locations_cache = _build_valid_locations()
+    return _valid_locations_cache
+
+def _build_valid_locations() -> list:
     locations = []
     location_database = database()
     #logger.debug(type(location_database))
@@ -346,7 +364,7 @@ def get_valid_locations() -> list:
                     "latitude": sub_location_info[0].latitude,
                     "longitude": sub_location_info[0].longitude
                 })
-        locations.sort(key=lambda x: (x['name'], x['region']))
+    locations.sort(key=lambda x: (x['name'], x['region']))
     return locations
 
 def reload_location_data():
@@ -414,6 +432,9 @@ def get_all_data():
     def format_hum(hum):
         return "%0.1f%%" % hum if hum is not None else ""
 
+    disk = psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\')
+    mem = psutil.virtual_memory()
+
     # Return nicely formatted data in dictionary form:
     data_dict = {
       'time': datetime.now().strftime("%H:%M:%S.%f")[:-3],
@@ -448,12 +469,12 @@ def get_all_data():
       'camera_enabled' : str(camera_enabled),
       # System metrics
       'cpu_percent': str(round(psutil.cpu_percent(interval=0), 1)),
-      'ram_used_mb': str(round(psutil.virtual_memory().used / (1024 * 1024), 0)),
-      'ram_total_mb': str(round(psutil.virtual_memory().total / (1024 * 1024), 0)),
-      'ram_percent': str(round(psutil.virtual_memory().percent, 1)),
-      'disk_used_gb': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').used / (1024 ** 3), 1)),
-      'disk_total_gb': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').total / (1024 ** 3), 1)),
-      'disk_percent': str(round(psutil.disk_usage('/' if os.name == 'posix' else os.path.splitdrive(os.path.abspath(__file__))[0] + '\\').percent, 1)),
+      'ram_used_mb': str(round(mem.used / (1024 * 1024), 0)),
+      'ram_total_mb': str(round(mem.total / (1024 * 1024), 0)),
+      'ram_percent': str(round(mem.percent, 1)),
+      'disk_used_gb': str(round(disk.used / (1024 ** 3), 1)),
+      'disk_total_gb': str(round(disk.total / (1024 ** 3), 1)),
+      'disk_percent': str(round(disk.percent, 1)),
       'python_version': sys.version.split()[0],
         'timer_mode': timer_mode,
         'timer_open_time': timer_open_time,
@@ -538,12 +559,14 @@ def temperature_task():
             # If it is midnight then reset the mins and maxes so we get fresh values for the new day:
             current_date = date.today()
             if current_date != last_date:
-                global_vars.instance().set_values({ \
-                    "temp_in_min": 500, "temp_in_max": -500, \
-                    "temp_out_min": 500, "temp_out_max": -500, \
-                    "hum_in_min": 500, "hum_in_max": -500, \
-                    "hum_out_min": 500, "hum_out_max": -500, \
-                    "cpu_temp_min": 500, "cpu_temp_max": -500 \
+                # None (not 500/-500 sentinels) so a sensor that delivers no
+                # reading shows blank min/max instead of 260°C / -296°C.
+                global_vars.instance().set_values({
+                    "temp_in_min": None, "temp_in_max": None,
+                    "temp_out_min": None, "temp_out_max": None,
+                    "hum_in_min": None, "hum_in_max": None,
+                    "hum_out_min": None, "hum_out_max": None,
+                    "cpu_temp_min": None, "cpu_temp_max": None,
                 })
                 last_date = current_date
 
@@ -572,15 +595,28 @@ def door_task():
     when :meth:`step` returns ``False`` (aborted reference sequence that
     previously used ``continue``) we loop immediately without sleeping.
     """
+    door = DOOR()
     runner = DoorTaskRunner(
-        door=DOOR(),
+        door=door,
         get_sunrise_sunset=get_sunrise_and_sunset,
         get_current_time=get_current_time,
-        send_notification=send_push_notification,
+        # Never block the motor-control loop on network I/O.
+        send_notification=send_push_notification_async,
+        on_reference_complete=lambda _ms: save_config(),
     )
 
     while True:
-        step_completed = runner.step()
+        try:
+            step_completed = runner.step()
+        except Exception as e:
+            # An unexpected exception must not kill the only thread that
+            # drives (and stops) the motor.  Stop the motor and carry on.
+            logger.critical("door_task: unhandled exception in step - stopping motor: %s", e, exc_info=True)
+            try:
+                door.stop()
+            except Exception:
+                pass
+            step_completed = True
         if step_completed:
             time.sleep(runner.thread_sleep_time)
 
@@ -609,28 +645,29 @@ def data_log_task():
     log_dir = os.path.dirname(get_log_file_name())
     os.makedirs(log_dir, exist_ok=True)
 
-    last_log_file_name = ""
     while True:
-        data = get_all_data()
-
-        # Open new log file and write CSV header only if the file doesn't exist yet (new day or first run)
-        log_file_name = get_log_file_name()
-        if log_file_name != last_log_file_name:
-            if not os.path.exists(log_file_name):
-                with open(log_file_name, 'a') as file:
-                    header = "# " + ", ".join(data.keys()) + "\n"
-                    file.write(header)
-
-        # Append data to file:
         try:
-            with open(log_file_name, 'a') as file:
-                row = ", ".join(str(v) for v in data.values()) + "\n"
-                file.write(row)
+            data = get_all_data()
+        except Exception as e:
+            logger.error(f"data_log_task: failed to collect data: {e}")
+            time.sleep(5.0)
+            continue
+
+        # Append data to file (header only when the file is new).  Values are
+        # written with csv quoting because some of them (e.g. uptime
+        # "0 day(s), 1 hour(s), ...") contain commas and would otherwise shift
+        # every following column.
+        log_file_name = get_log_file_name()
+        try:
+            write_header = not os.path.exists(log_file_name)
+            with open(log_file_name, 'a', newline='') as file:
+                if write_header:
+                    file.write("# " + ", ".join(data.keys()) + "\n")
+                csv.writer(file, lineterminator="\n").writerow(str(v) for v in data.values())
         except Exception as e:
             logger.error(f"data_log_task: failed to write row: {e}")
 
         # Sleep a bit:
-        last_log_file_name = log_file_name
         time.sleep(5.0)
 
 def wifi_watchdog_task():
@@ -675,20 +712,24 @@ def wifi_watchdog_task():
 
 
 def camera_task():
-    if (global_vars.instance().get_value("enable_camera") == False):
+    if not global_vars.instance().get_value("enable_camera"):
         logger.info("Camera is disabled by configuration")
         return
     
-    cameraIndex = global_vars.instance().get_value("camera_index")
+    cameraIndex = global_vars.instance().get_value("camera_index") or 0
     logger.debug(f"Starting camera task with camera index: {cameraIndex}")
-    camera = Camera(device_index=cameraIndex)
+    try:
+        camera = Camera(device_index=cameraIndex)
+    except Exception as e:
+        logger.critical(f"Camera could not be initialised: {e}. Camera task will end now.")
+        return
 
     while True:
         try:
             frame = camera.get_frame()
             encoded_frame = base64.b64encode(frame).decode('utf-8')
             socketio.emit('camera', encoded_frame, namespace='/')
-        except RuntimeError as e:
+        except Exception as e:
             logger.critical(f"Error: {e}")
             logger.critical("Camera task will end now.")
             break
@@ -709,28 +750,41 @@ def handle_disconnect():
     pass
     #logger.debug('Client disconnected')
 
+def _manual_command(desired_state):
+    """Manual door command from the UI: switch to manual mode and persist it.
+
+    Auto/timer mode must be disabled for *every* manual command (including
+    stop) — otherwise the next schedule window would move the door again —
+    and the change is saved so a restart does not silently re-enable it.
+    """
+    global_vars.instance().set_values({
+        "auto_mode": "False",
+        "timer_mode": "False",
+        "desired_door_state": desired_state,
+    })
+    save_config()
+
 @socketio.on('open')
 def handle_open():
     logger.info('[Manual Mode] User commanded door to OPEN. Disabling auto/timer modes.')
-    global_vars.instance().set_value("auto_mode", "False")
-    global_vars.instance().set_value("timer_mode", "False")
-    global_vars.instance().set_value("desired_door_state", "open")
+    _manual_command("open")
 
 @socketio.on('close')
 def handle_close():
     logger.info('[Manual Mode] User commanded door to CLOSE. Disabling auto/timer modes.')
-    global_vars.instance().set_value("auto_mode", "False")
-    global_vars.instance().set_value("timer_mode", "False")
-    global_vars.instance().set_value("desired_door_state", "closed")
+    _manual_command("closed")
 
 @socketio.on('stop')
 def handle_stop():
     logger.info('[Manual Mode] User commanded door to STOP. Disabling auto/timer modes.')
-    global_vars.instance().set_value("desired_door_state", "stopped")
+    _manual_command("stopped")
 
 @socketio.on('toggle')
 def handle_toggle(message):
     logger.debug('Toggle button pressed')
+    if not isinstance(message, dict) or 'toggle' not in message:
+        logger.warning("toggle: invalid payload %r", message)
+        return
     toggle_value = message['toggle']
     logger.debug(f'Toggle button pressed: {toggle_value}')
     if toggle_value:
@@ -748,6 +802,9 @@ def handle_toggle(message):
 @socketio.on('toggle_timer')
 def handle_toggle_timer(message):
     logger.debug('Timer Toggle button pressed')
+    if not isinstance(message, dict) or 'toggle' not in message:
+        logger.warning("toggle_timer: invalid payload %r", message)
+        return
     toggle_value = message['toggle']
     logger.debug(f'Timer Toggle button pressed: {toggle_value}')
     if toggle_value:
@@ -759,29 +816,67 @@ def handle_toggle_timer(message):
         global_vars.instance().set_value("timer_mode", "False")
     save_config()
 
+def _normalize_hhmm(value):
+    """Return *value* as "HH:MM" or None if it is not a valid time of day.
+
+    Accepts "H:MM", "HH:MM" and "HH:MM:SS" (browsers may send seconds).
+    """
+    if not isinstance(value, str):
+        return None
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(value.strip(), fmt).strftime("%H:%M")
+        except ValueError:
+            continue
+    return None
+
 @socketio.on('timer_times')
 def handle_timer_times(data):
-    timer_open_time = data.get('timer_open_time', data.get('open_time'))
-    timer_close_time = data.get('timer_close_time', data.get('close_time'))
-    if timer_open_time is not None and timer_close_time is not None:
-        global_vars.instance().set_values({"timer_open_time": timer_open_time, "timer_close_time": timer_close_time})
-        save_config()
+    if not isinstance(data, dict):
+        return
+    timer_open_time = _normalize_hhmm(data.get('timer_open_time', data.get('open_time')))
+    timer_close_time = _normalize_hhmm(data.get('timer_close_time', data.get('close_time')))
+    if timer_open_time is None or timer_close_time is None:
+        logger.warning(f"Ignoring invalid timer times: {data}")
+        return
+    global_vars.instance().set_values({"timer_open_time": timer_open_time, "timer_close_time": timer_close_time})
+    save_config()
+
+MAX_SUN_OFFSET_MIN = 720  # ±12 h
 
 @socketio.on('auto_offsets')
 def handle_input_numbers(data):
-    sunrise_offset = data['sunrise_offset']
-    sunset_offset = data['sunset_offset']
-    global_vars.instance().set_values({"sunrise_offset": int(sunrise_offset), "sunset_offset": int(sunset_offset)})
+    try:
+        sunrise_offset = int(data['sunrise_offset'])
+        sunset_offset = int(data['sunset_offset'])
+    except (TypeError, ValueError, KeyError):
+        logger.warning(f"Ignoring invalid sunrise/sunset offsets: {data}")
+        return
+    if abs(sunrise_offset) > MAX_SUN_OFFSET_MIN or abs(sunset_offset) > MAX_SUN_OFFSET_MIN:
+        logger.warning(f"Ignoring out-of-range sunrise/sunset offsets: {data}")
+        return
+    global_vars.instance().set_values({"sunrise_offset": sunrise_offset, "sunset_offset": sunset_offset})
     save_config()
 
 @socketio.on('update_location')
 def handle_update_location(location_data):
-    # Extract location data from the received message
+    # Validate before storing: an invalid timezone or coordinate saved to
+    # config.yaml would make reload_location_data() crash on the next boot.
+    if not isinstance(location_data, dict):
+        return
     city = location_data.get("city")
     region = location_data.get("region")
     timezone = location_data.get("timezone")
-    latitude = location_data.get("latitude")
-    longitude = location_data.get("longitude")
+    try:
+        latitude = float(location_data.get("latitude"))
+        longitude = float(location_data.get("longitude"))
+        pytz.timezone(timezone)
+    except (TypeError, ValueError, pytz.UnknownTimeZoneError, AttributeError):
+        logger.warning(f"Ignoring invalid location update: {location_data}")
+        return
+    if not (-90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0):
+        logger.warning(f"Ignoring out-of-range coordinates: {location_data}")
+        return
 
     # Update global location variables
     new_location = {
@@ -1020,21 +1115,49 @@ def serve_manifest():
 def serve_sw():
     return send_file('sw.js', mimetype='application/javascript')
 
+subscriptions_lock = Lock()
+
+def get_subscriptions_filename():
+    return os.path.join(root_path, ".subscriptions.json")
+
+def load_subscriptions() -> dict:
+    """Read .subscriptions.json; a missing or corrupt file yields no subscriptions."""
+    path = get_subscriptions_filename()
+    try:
+        with open(path, 'r') as f:
+            content = json.load(f)
+        if isinstance(content, dict) and isinstance(content.get("subscriptions"), list):
+            return content
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        logger.error(f"Could not read {path}: {e}")
+    return {"subscriptions": []}
+
+def save_subscriptions(content: dict):
+    path = get_subscriptions_filename()
+    tmp = path + ".tmp"
+    with open(tmp, 'w') as f:
+        json.dump(content, f)
+    os.replace(tmp, path)
+
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
-    subscription = request.json
-    logger.debug('Received subscription:', subscription)
-    currentJsonContent = None
-    if os.path.exists(".subscriptions.json"):
-        currentJsonContent = json.loads(open(".subscriptions.json").read())
+    subscription = request.get_json(silent=True)
+    if not isinstance(subscription, dict) or not subscription.get("endpoint"):
+        return jsonify({'error': 'Subscription with an endpoint required'}), 400
+    logger.debug('Received subscription: %s', subscription.get("endpoint"))
 
-    if currentJsonContent is None:
-        currentJsonContent = {"subscriptions": []}
-
-    currentJsonContent["subscriptions"].append(subscription)
-
-    with open('.subscriptions.json', 'w') as f:
-        json.dump(currentJsonContent, f)
+    with subscriptions_lock:
+        content = load_subscriptions()
+        # Replace an existing subscription for the same endpoint (browsers
+        # re-subscribe on every page load) instead of adding duplicates.
+        content["subscriptions"] = [
+            sub for sub in content["subscriptions"]
+            if not (isinstance(sub, dict) and sub.get("endpoint") == subscription["endpoint"])
+        ]
+        content["subscriptions"].append(subscription)
+        save_subscriptions(content)
 
     return jsonify({'message': 'Subscription successful!'})
 
@@ -1042,8 +1165,9 @@ def subscribe():
 def get_version():
     import subprocess
     commit_hash = "unknown"
-    if os.path.exists('version.txt'):
-        with open('version.txt', 'r') as f:
+    version_file = os.path.join(root_path, "version.txt")
+    if os.path.exists(version_file):
+        with open(version_file, 'r') as f:
             commit_hash = f.read().strip()
     return jsonify({'version': commit_hash})
 
@@ -1163,6 +1287,30 @@ def api_csv_files():
     return jsonify(files)
 
 
+def _align_csv_values(headers, values):
+    """Map a parsed CSV row onto *headers*.
+
+    Rows written before values were quoted contain unquoted commas inside
+    the ``uptime`` field ("0 day(s), 1 hour(s), ..."), producing extra
+    columns.  For such legacy rows the columns before ``uptime`` are taken
+    from the start and the columns after it from the end, so every field
+    lands under its own header again.  Returns None for rows that are too
+    short or cannot be realigned.
+    """
+    if len(values) == len(headers):
+        return values
+    if len(values) < len(headers):
+        return None
+    if 'uptime' not in headers:
+        return values[:len(headers)]
+    idx = headers.index('uptime')
+    n_after = len(headers) - idx - 1
+    head = values[:idx]
+    tail = values[len(values) - n_after:] if n_after else []
+    middle = ", ".join(values[idx:len(values) - n_after])
+    return head + [middle] + tail
+
+
 @app.route('/api/csv/<path:filename>')
 def api_csv_content(filename):
     """Return parsed, downsampled rows from a CSV log file as JSON."""
@@ -1197,8 +1345,9 @@ def api_csv_content(filename):
                 if headers is None:
                     headers = [h.strip().lstrip('#').strip() for h in line.split(',')]
                     continue
-                values = [v.strip() for v in line.split(',')]
-                if len(values) < len(headers):
+                values = [v.strip() for v in next(csv.reader([line], skipinitialspace=True))]
+                values = _align_csv_values(headers, values)
+                if values is None:
                     continue
                 row = {}
                 for h, v in zip(headers, values):
@@ -1241,6 +1390,24 @@ _GPIO_PIN_FIELDS = [
 _GPIO_BOOL_FIELDS = ["invert_end_up", "invert_end_down"]
 
 
+def _parse_bool(value):
+    """Parse JSON booleans and common string/number spellings; None if invalid.
+
+    (``bool("false")`` is True, so a plain bool() cast is wrong for form data.)
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off", ""):
+            return False
+    return None
+
+
 @app.route('/api/gpio-config', methods=['GET'])
 def api_get_gpio_config():
     """Return the current GPIO pin configuration."""
@@ -1277,7 +1444,23 @@ def api_set_gpio_config():
 
     for field in _GPIO_BOOL_FIELDS:
         if field in data:
-            existing[field] = bool(data[field])
+            parsed = _parse_bool(data[field])
+            if parsed is None:
+                errors.append(f"'{field}' must be a boolean")
+            else:
+                existing[field] = parsed
+
+    # Two functions on the same GPIO would e.g. make an endstop read the
+    # motor output — reject such configurations.
+    assigned = {}
+    for field in _GPIO_PIN_FIELDS:
+        pin_value = existing.get(field)
+        if pin_value is None:
+            continue
+        if pin_value in assigned:
+            errors.append(f"'{field}' and '{assigned[pin_value]}' both use GPIO {pin_value}")
+        else:
+            assigned[pin_value] = field
 
     if "reference_timeout" in data:
         try:
@@ -1385,12 +1568,24 @@ def api_set_wifi_config():
     
     if "ssid" in data: existing["ssid"] = str(data["ssid"])
     if "password" in data: existing["password"] = str(data["password"])
-    if "ap_ssid" in data: existing["ap_ssid"] = str(data["ap_ssid"])
-    if "ap_password" in data: existing["ap_password"] = str(data["ap_password"])
-    try:
-        if "timeout" in data: existing["timeout"] = int(data["timeout"])
-    except ValueError:
-        return jsonify({'error': 'Timeout must be an integer'}), 400
+    if "ap_ssid" in data:
+        if not str(data["ap_ssid"]).strip():
+            return jsonify({'error': 'AP SSID must not be empty'}), 400
+        existing["ap_ssid"] = str(data["ap_ssid"])
+    if "ap_password" in data:
+        # WPA2 requires 8-63 characters; nmcli refuses to start the hotspot
+        # otherwise, which would leave the device unreachable (no fallback AP).
+        if not (8 <= len(str(data["ap_password"])) <= 63):
+            return jsonify({'error': 'AP password must be 8-63 characters'}), 400
+        existing["ap_password"] = str(data["ap_password"])
+    if "timeout" in data:
+        try:
+            timeout_val = int(data["timeout"])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Timeout must be an integer'}), 400
+        if timeout_val <= 0:
+            return jsonify({'error': 'Timeout must be positive'}), 400
+        existing["timeout"] = timeout_val
 
     global_vars.instance().set_value("wifi", existing)
     save_config()
@@ -1404,6 +1599,8 @@ def api_set_wifi_config():
 def api_wifi_connect():
     """Immediately try connecting to the selected WiFi (does not save to config)."""
     data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body required'}), 400
     ssid = data.get("ssid")
     password = data.get("password")
     if not ssid:
@@ -1575,8 +1772,6 @@ def configure_logging():
 
 vapid_private_key = None
 def send_push_notification(title : str, body : str):
-    jsonContent = None
-    toRemove = []
     payload = {"title": title, "body": body}
     try:
         logger.debug("Sending push notification with payload: " + str(payload))
@@ -1587,33 +1782,45 @@ def send_push_notification(title : str, body : str):
                 logger.critical("Vapid private key not set, can't send push notification")
                 return
 
-        # Load subscription info from file
-        if not os.path.exists(".subscriptions.json"):
-            logger.critical("No subscriptions file found, can't send push notification")
+        with subscriptions_lock:
+            subscriptions = list(load_subscriptions()["subscriptions"])
+        if not subscriptions:
+            logger.warning("No push subscriptions registered, can't send push notification")
             return
 
-        jsonContent = json.loads(open(".subscriptions.json").read())
         vapid_claims = {"sub": "mailto:your-email@example.com"}
-
-        for subscription in jsonContent.get("subscriptions", []):
-            valid = send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims)
-            if not valid:
-                toRemove.append(subscription)
+        expired = []
+        for subscription in subscriptions:
+            if not send_individual_push_notification(subscription, payload, vapid_private_key, vapid_claims):
+                expired.append(subscription)
     except Exception as e:
         logger.error(f"Error in send_push_notification: {e}")
-    
-    for remove in toRemove:
-        jsonContent["subscriptions"].remove(remove)
+        return
 
-    try:
-        with open('.subscriptions.json', 'w') as f:
-            json.dump(jsonContent, f)
-    except Exception as e:
-        logger.debug(f"Error in removing invalid subscriptions from file: {e}")
-    
+    # Only rewrite the file when something actually has to be removed; re-read
+    # it under the lock so subscriptions added meanwhile are not lost.
+    if expired:
+        try:
+            with subscriptions_lock:
+                content = load_subscriptions()
+                content["subscriptions"] = [s for s in content["subscriptions"] if s not in expired]
+                save_subscriptions(content)
+        except Exception as e:
+            logger.error(f"Error in removing invalid subscriptions from file: {e}")
+
+
+def send_push_notification_async(title: str, body: str):
+    """Send a push notification from a background thread.
+
+    Web Push requests can take up to 10 s per subscription; the door control
+    loop must never block on them.
+    """
+    Thread(target=send_push_notification, args=(title, body), daemon=True).start()
 
 
 def send_individual_push_notification(subscription_info, payload, vapid_private_key, vapid_claims) -> bool:
+    """Send one notification.  Returns False if the subscription has expired
+    (HTTP 404/410 from the push service) and should be removed."""
     try:
         webpush(
             subscription_info,
@@ -1623,19 +1830,15 @@ def send_individual_push_notification(subscription_info, payload, vapid_private_
             timeout=10
         )
     except WebPushException as ex:
-        #TODO remove subscription if it is not valid anymore
         logger.debug(f"WebPushException occurred: {ex}")
-        responseCode = getattr(ex, 'response', None)
-        
-        if responseCode is not None:
-            if responseCode.status_code == 410:
-                logger.debug("Subscription is no longer valid, removing it.")
-                return False
-        else:
-            logger.debug(f"Response: {responseCode}")
-            logger.debug(f"Status: {getattr(ex, 'status_code', None)}")
+        response = getattr(ex, 'response', None)
+        status = getattr(response, 'status_code', None)
+        if status in (404, 410):
+            logger.debug("Subscription is no longer valid, removing it.")
+            return False
+        logger.debug(f"Push failed with status: {status}")
     except Exception as ex:
-        logger.error(f"General Exception occurred while sending push notification: {ex}")#
+        logger.error(f"General Exception occurred while sending push notification: {ex}")
     return True
 
 
@@ -1646,7 +1849,11 @@ def load_notification_keys():
             yaml = YAML.YAML()
             content = file.read()
             yaml_config = yaml.load(content)
-            global_vars.instance().set_values(yaml_config["secrets"])
+            secrets = yaml_config.get("secrets") if isinstance(yaml_config, dict) else None
+            if isinstance(secrets, dict):
+                global_vars.instance().set_values(secrets)
+            else:
+                logger.critical(".secrets.yaml has no 'secrets' section - push notifications disabled.")
     else:
         logger.critical("No secrets file found - the system will missbehave without it.")
         logger.critical("Run generate_vapid_keys.py and save the output in .secrets.yaml to fix this.")

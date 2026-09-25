@@ -111,7 +111,7 @@ class DOOR():
     def ErrorState(self, state=None, stopDoor: bool = True):
         if state is not None and state != self.errorState:
             if stopDoor:
-                self.stop (str(state))
+                self.stop()
             self.errorState = state
             logger.critical("Error state set to: " + str(state) + " - Stopping all motor activity until error is cleared.")
             return True
@@ -136,14 +136,12 @@ class DOOR():
         sequenceTimeoutTime = sequenceStartedTime + referenceSequenceTimeout
         logger.debug("Current time %s - Timeout time %s", sequenceStartedTime, sequenceTimeoutTime)
 
-        #check if the endstop is already hit
-        if GPIO.input(end_down) == compareValueLower:
-            logger.error("Endstop already hit, stopping motor")
-            self.reference_door_active = False
-            return False
-        
-        if GPIO.input(end_up) == compareValueUpper:
-            logger.error("Endstop already hit, stopping motor")
+        # Both endstops active at once is physically impossible and points to
+        # a wiring / invert-config fault.  Starting from either endstop is the
+        # normal case: at the lower endstop the close leg finishes immediately,
+        # at the upper endstop the door simply travels down first.
+        if GPIO.input(end_down) == compareValueLower and GPIO.input(end_up) == compareValueUpper:
+            logger.error("Both endstops report active - check wiring / invert settings. Reference aborted.")
             self.reference_door_active = False
             return False
         logger.debug("Setting motor to close...")

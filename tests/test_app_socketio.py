@@ -50,16 +50,18 @@ def test_open_close_switch_to_manual_mode(sio_client, event, desired):
     assert gvals("desired_door_state", "auto_mode", "timer_mode") == [desired, "False", "False"]
 
 
-def test_open_does_not_persist_mode_change(sio_client, tmp_path):
-    sio_client.emit("open")
-    assert not (tmp_path / "config.yaml").exists()
+@pytest.mark.parametrize("event", ["open", "close", "stop"])
+def test_manual_commands_persist_manual_mode(config_loaded, sio_client, tmp_path, event):
+    gv.instance().set_values({"auto_mode": "True", "timer_mode": "True"})
+    sio_client.emit(event)
+    cfg = saved_config(tmp_path)
+    assert (cfg["auto_mode"], cfg["timer_mode"]) == ("False", "False")
 
 
-def test_stop_keeps_modes(sio_client):
-    # Quirk: the log message claims auto/timer are disabled, but they are not.
-    gv.instance().set_values({"auto_mode": "True", "timer_mode": "False"})
+def test_stop_switches_to_manual_mode(config_loaded, sio_client):
+    gv.instance().set_values({"auto_mode": "True", "timer_mode": "True"})
     sio_client.emit("stop")
-    assert gvals("desired_door_state", "auto_mode") == ["stopped", "True"]
+    assert gvals("desired_door_state", "auto_mode", "timer_mode") == ["stopped", "False", "False"]
 
 
 # ── mode toggles ─────────────────────────────────────────────────────────────
