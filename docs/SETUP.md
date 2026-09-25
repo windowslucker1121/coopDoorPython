@@ -157,9 +157,15 @@ saving.
 
 ## Updating
 
-*System & updates → Update* pulls the latest version and restarts the app
-(needs the systemd service above). System & updates → Update also lets you
-switch to a development branch.
+*System & updates → Update & restart* pulls the latest version of the
+installed branch and restarts the app (needs the systemd service above). The
+card shows the channel (**Stable** = `main`, **Dev** = any other branch), the
+commit and whether an update is available.
+
+- **Switch to dev release** lists all branches on GitHub; pick one to install
+  it. Dev releases may be unstable.
+- **Switch to stable (main)** goes back.
+- Changed `requirements.txt` is installed automatically during the update.
 
 Manually: `git pull && pip install -r requirements.txt`, then
 `sudo systemctl restart chicken`.

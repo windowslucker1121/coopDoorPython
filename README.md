@@ -33,7 +33,8 @@ all in a web app.
 - Network: Wi-Fi scan/save/connect, fallback hotspot with captive portal
 - Door & hardware: calibration, live GPIO pins, pin configuration, door simulator (mock hardware)
 - Logs: viewer with search, level and component filters
-- System & updates: service health, set clock, update & restart, reboot, theme, push notifications
+- System & updates: service health, set clock, reboot, theme, push notifications
+- One-click updates; switch between **Stable** (`main`) and any **Dev** branch
 - Live internals: state machine, wiring LEDs, timers, workers, all settings - live
 
 **App**
