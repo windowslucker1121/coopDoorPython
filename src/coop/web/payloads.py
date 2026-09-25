@@ -195,7 +195,11 @@ def debug_payload(app: "Application") -> dict:
                if t.name not in workers]
     threads += [{"name": f"worker:{w.name}", "daemon": True, "alive": w.alive, "errors": w.errors}
                 for w in app.workers]
+    sensors = {k: {"value": v.value, "min": v.min, "max": v.max} for k, v in app.environment.values.items()}
     return {
+        "live": app.controller.diagnostics(),
+        "sensors": sensors,
+        "workers": [{"name": w.name, "alive": w.alive, "errors": w.errors} for w in app.workers],
         "pins": pins,
         "door_constants": door_constants,
         "global_vars": state,

@@ -284,8 +284,7 @@ def test_system_information(ui, server):
     page.locator("[data-health-refresh]").click()
     expect(page.locator("[data-health] [data-worker=broadcast]")).to_have_text("Running")
     expect(page.locator("[data-skew]")).to_have_text("In sync")
-    page.locator("[data-internals] summary").click()
-    expect(page.locator("[data-internals-body]")).to_contain_text('"door"')
+    expect(page.locator("[data-open-internals]")).to_have_attribute("href", "#/internals")
 
 
 def test_system_time_controls(ui):
@@ -381,7 +380,7 @@ def test_every_page_renders_without_errors_in_dark_mode(browser, server):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    for route in ("home", "climate", "history", "camera", "schedule", "network", "hardware", "logs", "system", "more"):
+    for route in ("home", "climate", "history", "camera", "schedule", "network", "hardware", "logs", "system", "internals", "more"):
         page.goto(f"{server.base}/#/{route}")
         page.wait_for_function("() => window.__coop && window.__coop.S.data")
         page.wait_for_timeout(300)

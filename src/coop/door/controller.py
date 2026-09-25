@@ -101,6 +101,35 @@ class DoorController:
         self._published_fault: str | None = None
         self._calibrating = False
 
+    def diagnostics(self) -> dict:
+        """Live inner state for the diagnostics page (read from the web
+        thread; plain attribute reads, so at worst one step stale)."""
+        mono = self._clock.monotonic()
+        settings = self._config.settings
+        driver = self.driver
+        out = driver.motor_outputs()
+        motor = ("down" if out["motor_in1"] else "up") if out["motor_ena"] else "off"
+        switch = driver.switch_position()
+        travel_s = (settings.reference_travel_ms / 1000.0) if settings.reference_travel_ms else self.DEFAULT_TRAVEL_S
+        since = self._move_since
+        return {
+            "state": driver.state.value,
+            "desired": self.desired.value,
+            "motor": motor,
+            "motor_outputs": out,
+            "upper_endstop": driver.upper_active(),
+            "lower_endstop": driver.lower_active(),
+            "switch": switch.value if switch else None,
+            "fault": driver.fault,
+            "reference_running": self._calibrating or driver.reference_active,
+            "move_elapsed_s": round(mono - since, 1) if since is not None else None,
+            "move_budget_s": round(travel_s + self.MOVE_MARGIN_S, 1),
+            "travel_s": round(travel_s, 2),
+            "retry_in_s": round(max(0.0, self.retry_at - mono), 1) if self.retry_at is not None else None,
+            "premature_close_count": self.premature_count,
+            "premature_close_max": self.PREMATURE_CLOSE_MAX_RETRIES,
+        }
+
     def recent_events(self, limit: int = 20) -> list[dict]:
         return list(self.events)[-limit:][::-1]
 

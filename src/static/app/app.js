@@ -41,6 +41,11 @@
     lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
+    locate: '<circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>',
+    pulse: '<path d="M2 12h4l3-8 5 16 3-8h5"/>',
+    copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    pause: '<path d="M8 5v14M16 5v14"/>',
+    play: '<path d="M7 4.5v15l12-7.5z"/>',
   };
   const icon = (name, size = 20, sw = 1.9) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -223,7 +228,7 @@
   const NAV = [
     { group: 'Coop', items: [['home', 'Home', 'home'], ['climate', 'Climate', 'thermo'], ['history', 'History', 'chart'], ['camera', 'Camera', 'camera']] },
     { group: 'Setup', items: [['schedule', 'Schedule & location', 'clock'], ['network', 'Network', 'wifi'], ['hardware', 'Door & hardware', 'chip']] },
-    { group: 'Device', items: [['logs', 'Logs', 'list'], ['system', 'System & updates', 'sliders']] },
+    { group: 'Device', items: [['logs', 'Logs', 'list'], ['system', 'System & updates', 'sliders'], ['internals', 'Live internals', 'pulse']] },
   ];
   const TABS = [['home', 'Home', 'home'], ['climate', 'Climate', 'thermo'], ['history', 'History', 'chart'], ['more', 'More', 'menu']];
   const href = (name) => (name === 'home' ? '#/' : `#/${name}`);
@@ -233,7 +238,7 @@
       g.items.map(([name, label, ic]) => `<a href="${href(name)}" data-nav="${name}">${icon(ic)}${esc(label)}</a>`).join('')).join('');
     $('#tabbar').innerHTML = TABS.map(([name, label, ic]) => `<a href="${href(name)}" data-nav="${name}">${icon(ic, 22)}${esc(label)}</a>`).join('');
   }
-  const MORE_PAGES = ['camera', 'schedule', 'network', 'hardware', 'logs', 'system', 'more'];
+  const MORE_PAGES = ['camera', 'schedule', 'network', 'hardware', 'logs', 'system', 'internals', 'more'];
   function markNav(name) {
     $$('[data-nav]').forEach((a) => {
       const inTabbar = a.closest('#tabbar');
@@ -706,7 +711,11 @@
         <section class="card" aria-label="Location">
           <div class="card-head"><h2>Location</h2><span class="hint">used for sunrise and sunset</span></div>
           <p>Current: <strong data-loc-current>${esc(loc.city)}${loc.region ? ', ' + esc(loc.region) : ''}</strong> <span class="muted">· ${esc(loc.timezone)}</span> <span class="muted" data-loc-sun></span></p>
-          <div class="field"><label for="loc-search">Find a city</label><input class="input" id="loc-search" type="search" placeholder="e.g. Berlin, Denver, London" autocomplete="off" data-loc-search></div>
+          <div class="loc-find">
+            <div class="field"><label for="loc-search">Find a city</label><input class="input" id="loc-search" type="search" placeholder="e.g. Berlin, Denver, London" autocomplete="off" data-loc-search></div>
+            <button class="btn" type="button" data-locate>${icon('locate', 18)}Use my location</button>
+          </div>
+          <p class="form-msg" data-locate-msg role="status"></p>
           <div class="loc-results" data-loc-results hidden></div>
           <form class="stack" data-location novalidate>
             <div class="grid-2">
@@ -759,14 +768,18 @@
       const search = $('[data-loc-search]', root);
       const results = $('[data-loc-results]', root);
       let locations = null;
+      const loadLocations = async () => {
+        if (!locations) {
+          locations = await api('/api/locations');
+          $('#tz-list').innerHTML = [...new Set(locations.map((l) => l.timezone))].sort().map((t) => `<option value="${esc(t)}">`).join('');
+        }
+        return locations;
+      };
       const pretty = (n) => { const [grp, city] = String(n).split(' - '); const t = (x) => (x || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()); return city ? `${t(city)} (${t(grp)})` : t(grp); };
       search.addEventListener('input', async () => {
         const q = search.value.trim().toLowerCase();
         if (q.length < 2) { results.hidden = true; return; }
-        if (!locations) {
-          try { locations = await api('/api/locations'); } catch (e) { toast(e.message, 'error'); return; }
-          $('#tz-list').innerHTML = [...new Set(locations.map((l) => l.timezone))].sort().map((t) => `<option value="${esc(t)}">`).join('');
-        }
+        try { await loadLocations(); } catch (e) { toast(e.message, 'error'); return; }
         const hits = locations.filter((l) => l.name.toLowerCase().includes(q) || String(l.region).toLowerCase().includes(q)).slice(0, 8);
         results.innerHTML = hits.map((l, i) => `<button type="button" data-hit="${i}"><span>${esc(pretty(l.name))}</span><span class="muted">${esc(l.region)} · ${esc(l.timezone)}</span></button>`).join('') || '<div class="empty">No match - enter the coordinates below.</div>';
         results.hidden = false;
@@ -780,6 +793,77 @@
           $('button[type="submit"]', locForm).focus();
         }));
       });
+      // "Use my location": the browser's position (needs HTTPS or localhost),
+      // otherwise a best guess from this device's time zone.
+      const locMsg = (text, ok) => { const m = $('[data-locate-msg]', root); m.textContent = text; m.className = 'form-msg ' + (ok ? 'ok' : 'error'); };
+      const fill = (v) => {
+        const f = locForm;
+        f.city.value = v.city; f.region.value = v.region || ''; f.latitude.value = v.latitude;
+        f.longitude.value = v.longitude; f.timezone.value = v.timezone;
+        [f.city, f.latitude, f.longitude, f.timezone].forEach((i) => i.removeAttribute('aria-invalid'));
+        msg(f, '', true);
+        $('button[type="submit"]', f).focus();
+      };
+      const cityOf = (l) => pretty(l.name).replace(/ \(.*\)$/, '');
+      // The city list uses some legacy zone names (US/Central) while browsers
+      // report canonical ones (America/Chicago): compare zones by their UTC
+      // offsets in winter and summer instead of by name.
+      const offsetCache = {};
+      const tzOffsets = (tz) => {
+        if (!(tz in offsetCache)) {
+          try {
+            offsetCache[tz] = [0, 6].map((m) => new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+              .formatToParts(new Date(Date.UTC(2025, m, 1, 12))).find((x) => x.type === 'timeZoneName').value).join();
+          } catch (e) { offsetCache[tz] = null; }
+        }
+        return offsetCache[tz];
+      };
+      const sameZone = (a, b) => a === b || (!!tzOffsets(a) && tzOffsets(a) === tzOffsets(b));
+      const guessFromTimezone = (why) => {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        const last = tz.split('/').pop().replace(/_/g, ' ').toLowerCase();
+        const exact = locations.filter((l) => l.timezone === tz);
+        const alike = locations.filter((l) => sameZone(l.timezone, tz));
+        const byName = (list) => list.find((l) => cityOf(l).toLowerCase() === last);
+        const best = byName(exact) || byName(alike) || exact[0] || (tz.split('/')[0] === 'Etc' ? null : alike[0]);
+        if (!best || !tz) { locMsg(`${why} This device's time zone (${tz || 'unknown'}) matches no known city - search for your city instead.`, false); return; }
+        fill({ city: cityOf(best), region: best.region, latitude: best.latitude, longitude: best.longitude, timezone: tz });
+        locMsg(`${why} Filled in ${cityOf(best)} from this device's time zone (${tz}) - check it, then save.`, true);
+      };
+      const distanceKm = (a, b, c, d) => {
+        const r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2;
+        return 12742 * Math.asin(Math.sqrt(x));
+      };
+      $('[data-locate]', root).addEventListener('click', (e) => busy(e.currentTarget, async () => {
+        locMsg('', true);
+        try { await loadLocations(); } catch (err) { locMsg(err.message, false); return; }
+        if (!('geolocation' in navigator) || !window.isSecureContext) {
+          guessFromTimezone('The browser only shares your exact position with https:// pages.');
+          return;
+        }
+        let pos;
+        try {
+          pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }));
+        } catch (err) {
+          const why = err && err.code === 1 ? 'Location access was blocked.' : 'Your position could not be determined.';
+          guessFromTimezone(why);
+          return;
+        }
+        if (!root.isConnected) return;
+        const lat = +pos.coords.latitude.toFixed(5), lon = +pos.coords.longitude.toFixed(5);
+        let near = null, km = Infinity;
+        locations.forEach((l) => { const k = distanceKm(lat, lon, l.latitude, l.longitude); if (k < km) { km = k; near = l; } });
+        const close = near && km <= 50, regional = near && km <= 250;
+        const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        fill({
+          city: close ? cityOf(near) : 'My coop',
+          region: regional ? near.region : '',
+          latitude: lat, longitude: lon,
+          timezone: browserTz && (!regional || sameZone(near.timezone, browserTz)) ? browserTz : regional ? near.timezone : '',
+        });
+        locMsg(`Filled in from your position${pos.coords.accuracy >= 1 ? ` (±${Math.round(pos.coords.accuracy)} m)` : ''}${near ? ` - nearest city ${cityOf(near)}, ${Math.round(km)} km` : ''}. Check it, then save.`, true);
+      }));
+
       locForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = locForm;
@@ -1193,7 +1277,8 @@
           </section>
         </div>
         <section class="card" aria-label="Internal state">
-          <details data-internals><summary style="cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center">Show internal state (for troubleshooting)</summary><pre class="mono" style="font-size:12px;overflow:auto;max-height:420px;white-space:pre-wrap" data-internals-body>Loading…</pre></details>
+          <div class="row"><span class="spacer"><strong>Live internals</strong><br><span class="muted">Watch the door's state machine, wiring, timers, workers and every setting update in real time.</span></span>
+          <a class="btn btn-primary" href="#/internals" data-open-internals>${icon('pulse', 18)}Open live internals</a></div>
         </section>
       </div>`;
     },
@@ -1266,13 +1351,9 @@
       const install = $('[data-install]', root);
       install.hidden = !S.installPrompt;
       install.addEventListener('click', async () => { if (!S.installPrompt) return; S.installPrompt.prompt(); await S.installPrompt.userChoice; S.installPrompt = null; install.hidden = true; });
-      const det = $('[data-internals]', root);
-      this.onDebug = (p) => { if (det.open) $('[data-internals-body]', root).textContent = JSON.stringify({ state: p.global_vars, door: p.door_constants, system: p.system, threads: p.threads }, null, 2); };
-      socket.on('debug_data', this.onDebug);
-      det.addEventListener('toggle', () => { if (det.open) socket.emit('get_debug_data'); });
       this.clock = setInterval(() => { const el = $('[data-local-time]', root); if (el) el.textContent = localTimeString(new Date()); }, 1000);
     },
-    leave() { socket.off('debug_data', this.onDebug); clearInterval(this.clock); },
+    leave() { clearInterval(this.clock); },
     update(d, root) {
       bindValues(root, d);
       $('[data-local-time]', root).textContent = localTimeString(new Date());
@@ -1285,6 +1366,323 @@
     },
   };
 
+  // ── Live internals ───────────────────────────────────────────────────
+  // Everything the controller knows, redrawn every second from
+  // get_debug_data: the door state machine, the wiring, timers, workers,
+  // sensors and the full configuration.  Changed values flash briefly.
+  const SM_NODES = {
+    closed: [16, 88, 'Closed'], opening: [188, 14, 'Opening'], open: [360, 88, 'Open'],
+    closing: [188, 162, 'Closing'], stopped: [188, 88, 'Stopped'],
+  };
+  const SM_EDGES = [['closed', 'opening'], ['opening', 'open'], ['open', 'closing'], ['closing', 'closed'],
+    ['opening', 'stopped'], ['closing', 'stopped'], ['stopped', 'opening'], ['stopped', 'closing']];
+  function stateMachineSvg() {
+    const W = 144, H = 40;
+    const c = (n) => [SM_NODES[n][0] + W / 2, SM_NODES[n][1] + H / 2];
+    const edge = ([a, b]) => {
+      const [x1, y1] = c(a), [x2, y2] = c(b);
+      // stop the line at the node borders
+      const trim = (x, y, tx, ty) => { const dx = tx - x, dy = ty - y; const k = Math.min(Math.abs((W / 2 + 6) / (dx || 1e-9)), Math.abs((H / 2 + 6) / (dy || 1e-9))); return [x + dx * k, y + dy * k]; };
+      let [sx, sy] = trim(x1, y1, x2, y2), [ex, ey] = trim(x2, y2, x1, y1);
+      if (a === 'stopped' || b === 'stopped') {
+        // two-way link: draw the pair side by side instead of on top of each other
+        const shift = a === 'stopped' ? 12 : -12;
+        sx += shift; ex += shift;
+      }
+      return `<path class="sm-edge" data-edge="${a}-${b}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${ex.toFixed(1)},${ey.toFixed(1)}" marker-end="url(#sm-arrow)"/>`;
+    };
+    return `<svg class="sm" viewBox="0 0 520 216" role="img" aria-label="Door state machine" data-sm>
+      <defs><marker id="sm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>
+      ${SM_EDGES.map(edge).join('')}
+      ${Object.entries(SM_NODES).map(([k, [x, y, label]]) => `<g class="sm-node" data-node="${k}"><rect x="${x}" y="${y}" width="${W}" height="${H}" rx="12"/><text x="${x + W / 2}" y="${y + H / 2 + 5}" text-anchor="middle">${label}</text></g>`).join('')}
+    </svg>`;
+  }
+  const led = (key, label) => `<span class="led-row"><span class="led" data-led="${key}"></span><span>${label}</span></span>`;
+
+  // Set text; flash the element when the value changed since last time.
+  function liveText(el, text) {
+    if (!el) return;
+    text = String(text);
+    if (el.textContent === text) return;
+    const first = !el.dataset.seen;
+    el.textContent = text;
+    el.dataset.seen = '1';
+    if (!first) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  }
+  const fmtVal = (v) => (v === null || v === undefined ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  function flatten(obj, prefix = '', out = {}) {
+    Object.entries(obj || {}).forEach(([k, v]) => {
+      const key = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key, out); else out[key] = v;
+    });
+    return out;
+  }
+
+  const Internals = {
+    title: 'Live internals',
+    paused: false,
+    render() {
+      return `<div class="stack internals" style="gap:20px">
+        <section class="card live-head" aria-label="Live status">
+          <div class="row">
+            <span class="live-dot" data-live-dot></span>
+            <strong data-live-state>Connecting…</strong>
+            <span class="muted" data-live-stamp></span>
+            <span class="spacer"></span>
+            <button class="btn" type="button" data-pause aria-pressed="false">${icon('pause', 18)}Pause</button>
+            <button class="btn btn-ghost" type="button" data-copy>${icon('copy', 18)}Copy JSON</button>
+          </div>
+        </section>
+
+        <div class="int-top">
+          <section class="card" aria-label="Door state machine">
+            <div class="card-head"><h2>Door state machine</h2><span class="chip" data-v="mode">—</span></div>
+            ${stateMachineSvg()}
+            <div class="sm-legend"><span><i class="sw-cur"></i>current state</span><span><i class="sw-target"></i>target (desired)</span></div>
+            <div class="int-facts">
+              <div><span class="t-label">Desired</span><strong data-v="desired">—</strong></div>
+              <div><span class="t-label">Position</span><strong data-v="position">—</strong></div>
+              <div><span class="t-label">Travel time</span><strong data-v="travel">—</strong></div>
+              <div><span class="t-label">Close retries</span><strong data-v="retries">—</strong></div>
+            </div>
+            <div class="pos-track" aria-hidden="true"><span class="pos-fill" data-pos-fill></span><span class="pos-mark" data-pos-mark></span><span class="pos-lbl l">closed</span><span class="pos-lbl r">open</span></div>
+            <div>
+              <div class="row"><span>Motor run time</span><span class="spacer"></span><strong data-v="run">idle</strong></div>
+              <div class="bar run-bar"><span data-run-bar style="width:0"></span><i data-run-travel></i></div>
+              <p class="muted" style="font-size:13px;margin:6px 0 0">A move longer than the travel time plus ${'<span data-v="margin">20</span>'} s margin stops the door with "Endstop not reached".</p>
+            </div>
+            <div class="banner banner-danger" data-int-fault hidden><span class="b-icon">${icon('alert', 22, 2.2)}</span><span class="b-text"><strong>Fault</strong><span class="b-sub" data-v="fault"></span></span></div>
+          </section>
+
+          <section class="card" aria-label="Wiring">
+            <div class="card-head"><h2>Wiring</h2><span class="hint">logical level</span></div>
+            <div class="wiring">
+              <div class="wire-block">
+                <span class="eyebrow">Motor</span>
+                <div class="motor" data-motor><span class="motor-arrow">${icon('up', 28, 2.4)}</span><strong data-v="motor">off</strong></div>
+                <div class="led-grid">${led('motor_in1', 'in1')}${led('motor_in2', 'in2')}${led('motor_ena', 'enable')}</div>
+              </div>
+              <div class="wire-block">
+                <span class="eyebrow">Endstops</span>
+                <div class="led-grid">${led('upper', 'upper (open)')}${led('lower', 'lower (closed)')}</div>
+              </div>
+              <div class="wire-block">
+                <span class="eyebrow">Switch on the coop</span>
+                <div class="switch3" data-switch><span data-sw="open">open</span><span data-sw="off">middle</span><span data-sw="closed">close</span></div>
+              </div>
+              <div class="wire-block">
+                <span class="eyebrow">Calibration</span>
+                <strong data-v="calibrating">—</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="grid-3">
+          <section class="card" aria-label="Sensors"><div class="card-head"><h2>Sensors</h2></div><div class="stack" style="gap:14px" data-sensors></div></section>
+          <section class="card" aria-label="Workers"><div class="card-head"><h2>Workers &amp; threads</h2></div><div class="list" data-workers></div></section>
+          <section class="card" aria-label="System"><div class="card-head"><h2>System</h2></div><dl class="kv" data-system></dl></section>
+        </div>
+
+        <section class="card" aria-label="Configuration">
+          <div class="card-head"><h2>Configuration &amp; state</h2><span class="hint" data-cfg-count></span></div>
+          <label class="sr-only" for="cfg-filter">Filter</label><input class="input" id="cfg-filter" type="search" placeholder="Filter keys or values, e.g. gpio, door., sunrise" data-cfg-filter>
+          <div class="cfg-table" data-cfg></div>
+        </section>
+
+        <section class="card" aria-label="Constants">
+          <div class="card-head"><h2>Door constants</h2></div>
+          <dl class="kv kv-2col" data-consts></dl>
+        </section>
+
+        <section class="card" aria-label="Raw JSON">
+          <details data-raw><summary style="cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center">Raw JSON (live)</summary><pre class="mono raw-json" data-raw-body></pre></details>
+        </section>
+      </div>`;
+    },
+    enter(root) {
+      this.last = null;
+      this.cfgKeys = '';
+      // Poll every second, twice a second while the motor runs, and at once
+      // when the pushed door status changes (see update()).
+      const request = () => {
+        if (this.paused || document.hidden || !S.connected) return;
+        this.sentAt = performance.now();
+        socket.emit('get_debug_data');
+      };
+      this.request = request;
+      this.onDebug = (p) => { if (root.isConnected && !this.paused) this.paint(p, root); };
+      socket.on('debug_data', this.onDebug);
+      request();
+      let tick = 0;
+      this.timer = setInterval(() => {
+        tick += 1;
+        const moving = this.last && this.last.live && this.last.live.motor !== 'off';
+        if (moving || tick % 2 === 0) request();
+      }, 500);
+      const pause = $('[data-pause]', root);
+      pause.addEventListener('click', () => {
+        this.paused = !this.paused;
+        pause.setAttribute('aria-pressed', String(this.paused));
+        pause.innerHTML = this.paused ? `${icon('play', 18)}Resume` : `${icon('pause', 18)}Pause`;
+        this.paintLive(root);
+        if (!this.paused) request();
+      });
+      $('[data-copy]', root).addEventListener('click', async () => {
+        const text = JSON.stringify(this.last || {}, null, 2);
+        try { await navigator.clipboard.writeText(text); toast('Copied to the clipboard'); } catch (e) {
+          const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); toast('Copied to the clipboard'); } catch (e2) { toast('Copy failed', 'error'); }
+          ta.remove();
+        }
+      });
+      $('[data-cfg-filter]', root).addEventListener('input', () => { if (this.last) this.paintConfig(this.last, root, true); });
+    },
+    leave() { clearInterval(this.timer); socket.off('debug_data', this.onDebug); },
+    update(d) {
+      const sig = [d.state, d.door_desired, d.errorstate, d.override_active, d.reference_running, d.mode].join();
+      if (this.sig !== undefined && sig !== this.sig && this.request) this.request();
+      this.sig = sig;
+    },
+    paintLive(root) {
+      const dot = $('[data-live-dot]', root);
+      dot.dataset.state = this.paused ? 'paused' : S.connected ? 'live' : 'off';
+      $('[data-live-state]', root).textContent = this.paused ? 'Paused' : S.connected ? 'Live' : 'Not connected';
+    },
+    paint(p, root) {
+      this.last = p;
+      const v = (k) => $(`[data-v="${k}"]`, root);
+      const L = p.live || {};
+      const g = p.global_vars || {};
+      this.paintLive(root);
+      const ms = this.sentAt ? Math.round(performance.now() - this.sentAt) : null;
+      $('[data-live-stamp]', root).textContent = `updated ${p.timestamp}${ms !== null ? ` · ${ms} ms` : ''}`;
+
+      // state machine
+      const cur = L.state, target = { open: 'open', closed: 'closed', stopped: 'stopped' }[L.desired];
+      $$('[data-node]', root).forEach((n) => {
+        n.classList.toggle('cur', n.dataset.node === cur);
+        n.classList.toggle('target', n.dataset.node === target && target !== cur);
+        n.classList.toggle('fault', !!L.fault && n.dataset.node === cur);
+      });
+      $$('[data-edge]', root).forEach((e) => {
+        const [a, b] = e.dataset.edge.split('-');
+        e.classList.toggle('hot', (cur === 'opening' && b === 'open' && a === 'opening') || (cur === 'closing' && a === 'closing' && b === 'closed'));
+      });
+      liveText(v('mode'), L.reference_running ? 'Calibrating' : (MODE_LABEL[g['door.mode']] || g['door.mode'] || '—') + ' mode');
+      liveText(v('desired'), STATE_LABEL[L.desired] || L.desired || '—');
+      const pos = g['door.position'];
+      const known = typeof pos === 'number';
+      liveText(v('position'), known ? `${Math.round(pos * 100)} % open` : 'unknown');
+      $('[data-pos-fill]', root).style.width = known ? `${pos * 100}%` : '0';
+      $('[data-pos-mark]', root).style.left = known ? `${pos * 100}%` : '50%';
+      $('[data-pos-mark]', root).classList.toggle('unknown', !known);
+      liveText(v('travel'), g['door.reference_ms'] ? `${(g['door.reference_ms'] / 1000).toFixed(1)} s` : `not calibrated (${L.travel_s} s assumed)`);
+      liveText(v('retries'), `${L.premature_close_count} / ${L.premature_close_max}${L.retry_in_s !== null && L.retry_in_s !== undefined ? ` · again in ${L.retry_in_s} s` : ''}`);
+      liveText(v('margin'), Math.round(L.move_budget_s - L.travel_s));
+      const run = L.move_elapsed_s;
+      liveText(v('run'), run === null || run === undefined ? 'idle' : `${run.toFixed(1)} s of ${L.move_budget_s} s`);
+      const runBar = $('[data-run-bar]', root);
+      runBar.style.width = run ? `${Math.min(100, (run / L.move_budget_s) * 100)}%` : '0';
+      runBar.classList.toggle('late', !!run && run > L.travel_s);
+      $('[data-run-travel]', root).style.left = `${(L.travel_s / L.move_budget_s) * 100}%`;
+      $('[data-int-fault]', root).hidden = !L.fault;
+      liveText(v('fault'), L.fault || '');
+
+      // wiring
+      const o = L.motor_outputs || {};
+      [['motor_in1', o.motor_in1], ['motor_in2', o.motor_in2], ['motor_ena', o.motor_ena], ['upper', L.upper_endstop], ['lower', L.lower_endstop]]
+        .forEach(([k, on]) => { const el = $(`[data-led="${k}"]`, root); if (el) el.dataset.on = String(!!on); });
+      $('[data-motor]', root).dataset.dir = L.motor;
+      liveText(v('motor'), { up: 'opening ↑', down: 'closing ↓', off: 'off' }[L.motor] || L.motor);
+      const sw = L.switch || 'off';
+      $$('[data-sw]', root).forEach((el) => el.classList.toggle('on', el.dataset.sw === sw));
+      liveText(v('calibrating'), L.reference_running ? 'running…' : g['door.reference_ms'] ? 'done' : 'not calibrated');
+
+      // sensors
+      const sens = p.sensors || {};
+      const names = { temp_in: ['In the coop', '°C'], hum_in: ['Coop humidity', '%'], temp_out: ['Outside', '°C'], hum_out: ['Outside humidity', '%'], cpu_temp: ['Controller CPU', '°C'] };
+      const box = $('[data-sensors]', root);
+      const sensKeys = Object.keys(sens).join();
+      if (box.dataset.keys !== sensKeys) {
+        box.dataset.keys = sensKeys;
+        box.innerHTML = Object.keys(sens).map((k) => `<div class="sensor" data-sensor="${esc(k)}"><div class="row"><span>${esc((names[k] || [k])[0])}</span><span class="spacer"></span><strong data-sv></strong></div><div class="range"><span data-sr></span><i data-sdot></i></div><div class="row muted" style="font-size:12px"><span data-smin></span><span class="spacer"></span><span data-smax></span></div></div>`).join('') || '<p class="muted">No sensors.</p>';
+      }
+      Object.entries(sens).forEach(([k, r]) => {
+        const el = $(`[data-sensor="${k}"]`, box);
+        if (!el) return;
+        const unit = (names[k] || [0, ''])[1];
+        const f = (x) => (x === null || x === undefined ? '—' : `${(+x).toFixed(1)}${unit === '%' ? ' %' : '°'}`);
+        liveText($('[data-sv]', el), f(r.value));
+        $('[data-smin]', el).textContent = `min ${f(r.min)}`;
+        $('[data-smax]', el).textContent = `max ${f(r.max)}`;
+        const span = (r.max - r.min) || 1;
+        const at = r.value === null ? 0 : ((r.value - r.min) / span) * 100;
+        $('[data-sdot]', el).style.left = `${Math.max(0, Math.min(100, at))}%`;
+      });
+
+      // workers & threads
+      const threads = (p.threads || []).filter((t) => !String(t.name).startsWith('worker:'));
+      const rows = (p.workers || []).map((w) => ({ name: w.name, kind: 'worker', alive: w.alive, errors: w.errors }))
+        .concat(threads.map((t) => ({ name: t.name, kind: t.daemon ? 'daemon thread' : 'thread', alive: t.alive })));
+      const wbox = $('[data-workers]', root);
+      const wkeys = rows.map((r) => r.name).join();
+      if (wbox.dataset.keys !== wkeys) {
+        wbox.dataset.keys = wkeys;
+        wbox.innerHTML = rows.map((r) => `<div class="list-row" data-wrow="${esc(r.name)}"><span class="led" data-on="false"></span><span class="spacer"><strong>${esc(r.name)}</strong><br><span class="muted" style="font-size:12px">${esc(r.kind)}</span></span><span class="chip" data-werr></span></div>`).join('');
+      }
+      rows.forEach((r) => {
+        const el = $(`[data-wrow="${CSS.escape(r.name)}"]`, wbox);
+        if (!el) return;
+        $('.led', el).dataset.on = String(!!r.alive);
+        const chip = $('[data-werr]', el);
+        chip.hidden = r.errors === undefined;
+        liveText(chip, r.errors ? `${r.errors} error${r.errors > 1 ? 's' : ''}` : 'ok');
+        chip.className = 'chip ' + (r.errors ? 'chip-danger' : 'chip-ok');
+      });
+
+      // system
+      const sys = p.system || {};
+      const sbox = $('[data-system]', root);
+      if (!sbox.children.length) {
+        sbox.innerHTML = [['version', 'Version'], ['uptime', 'Uptime'], ['cpu_percent', 'CPU'], ['memory', 'Memory'], ['platform', 'Platform'], ['python', 'Python']]
+          .map(([k, l]) => `<dt>${l}</dt><dd data-sys="${k}"></dd>`).join('');
+      }
+      const sv = { version: sys.version, uptime: uptimeShort(sys.uptime), cpu_percent: `${sys.cpu_percent} %`, memory: `${Math.round(sys.memory_used_mb)} / ${Math.round(sys.memory_total_mb)} MB (${sys.memory_percent} %)`, platform: `${sys.platform} · ${sys.os_name}`, python: String(sys.python_version || '').split(' ')[0] };
+      Object.entries(sv).forEach(([k, val]) => liveText($(`[data-sys="${k}"]`, sbox), val ?? '—'));
+
+      this.paintConfig(p, root, false);
+
+      const cbox = $('[data-consts]', root);
+      const consts = p.door_constants || {};
+      if (!cbox.children.length) cbox.innerHTML = Object.keys(consts).map((k, i) => `<dt>${esc(k)}</dt><dd class="mono" data-const="${i}"></dd>`).join('');
+      Object.values(consts).forEach((val, i) => liveText($(`[data-const="${i}"]`, cbox), fmtVal(val)));
+
+      if ($('[data-raw]', root).open) {
+        const { logs, ...rest } = p;
+        $('[data-raw-body]', root).textContent = JSON.stringify(rest, null, 2);
+      }
+    },
+    paintConfig(p, root, force) {
+      const flat = flatten(p.global_vars || {});
+      const q = $('[data-cfg-filter]', root).value.trim().toLowerCase();
+      const keys = Object.keys(flat).sort().filter((k) => !q || k.toLowerCase().includes(q) || fmtVal(flat[k]).toLowerCase().includes(q));
+      const box = $('[data-cfg]', root);
+      const sig = keys.join('|');
+      if (force || sig !== this.cfgKeys) {
+        this.cfgKeys = sig;
+        let group = '';
+        box.innerHTML = keys.map((k) => {
+          const g = k.split('.')[0];
+          const head = g !== group ? `<div class="cfg-group">${esc((group = g))}</div>` : '';
+          return `${head}<div class="cfg-row"><span class="mono cfg-k">${esc(k.slice(g.length + 1) || k)}</span><span class="mono cfg-v" data-cfg-k="${esc(k)}"></span></div>`;
+        }).join('') || '<p class="empty">No matching keys.</p>';
+      }
+      $$('[data-cfg-k]', box).forEach((el) => liveText(el, fmtVal(flat[el.dataset.cfgK])));
+      $('[data-cfg-count]', root).textContent = `${keys.length} of ${Object.keys(flat).length} values`;
+    },
+  };
+
   // ── More (phone) ─────────────────────────────────────────────────────
   const More = {
     title: 'More',
@@ -1294,7 +1692,7 @@
         <div class="card" style="padding:14px 16px;flex-direction:row;align-items:center"><span class="conn" data-conn><span class="dot"></span><span data-conn-text>—</span></span><span class="spacer"></span><span class="muted" style="font-size:13px">Version <span data-bind="version">${esc(S.version || '—')}</span></span></div>
         <nav class="more-group" aria-label="Coop"><span class="eyebrow">Coop</span><div class="card">${link('camera', 'Camera', 'camera')}</div></nav>
         <nav class="more-group" aria-label="Setup"><span class="eyebrow">Setup</span><div class="card">${link('schedule', 'Schedule & location', 'clock', 'data-more-mode')}${link('network', 'Network', 'wifi')}${link('hardware', 'Door & hardware', 'chip', 'data-more-travel')}</div></nav>
-        <nav class="more-group" aria-label="Device"><span class="eyebrow">Device</span><div class="card">${link('logs', 'Logs', 'list')}${link('system', 'System & updates', 'sliders')}</div></nav>
+        <nav class="more-group" aria-label="Device"><span class="eyebrow">Device</span><div class="card">${link('logs', 'Logs', 'list')}${link('system', 'System & updates', 'sliders')}${link('internals', 'Live internals', 'pulse')}</div></nav>
       </div>`;
     },
     update(d, root) {
@@ -1304,7 +1702,7 @@
     },
   };
 
-  const PAGES = { home: Home, climate: Climate, history: History, camera: Camera, schedule: Schedule, network: Network, hardware: Hardware, logs: Logs, system: System, more: More };
+  const PAGES = { home: Home, climate: Climate, history: History, camera: Camera, schedule: Schedule, network: Network, hardware: Hardware, logs: Logs, system: System, internals: Internals, more: More };
 
   // ── router ───────────────────────────────────────────────────────────
   function routeName() {

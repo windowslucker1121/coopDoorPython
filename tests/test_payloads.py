@@ -75,7 +75,8 @@ def test_debug_payload(app):
     app.config.update(wifi=app.settings.wifi.merged({"password": "secretpw"}))
     app.controller.step()
     d = debug_payload(app)
-    assert set(d) == {"pins", "door_constants", "global_vars", "system", "threads", "logs", "timestamp"}
+    assert set(d) == {"live", "sensors", "workers", "pins", "door_constants", "global_vars", "system", "threads",
+                      "logs", "timestamp"}
     pins = [p["pin"] for p in d["pins"]]
     assert pins == sorted(pins)
     assert {p["name"] for p in d["pins"]} >= {"motor_in1", "endstop_up", "dht22_power"}
@@ -86,3 +87,31 @@ def test_debug_payload(app):
     assert "password_hash" not in str(g["config.auth"])
     assert "secretpw" not in str(d)
     assert d["system"]["version"] == "abc1234"
+
+
+def test_debug_live_block(rig_factory):
+    from coop.door.model import DesiredState
+    rig = rig_factory()
+    rig.step()
+    live = rig.controller.diagnostics()
+    assert (live["state"], live["motor"], live["lower_endstop"], live["upper_endstop"]) == ("stopped", "off", False, False)
+    assert live["move_budget_s"] == 10.0 + rig.controller.MOVE_MARGIN_S and live["switch"] is None
+    rig.controller.command(DesiredState.OPEN)
+    rig.step(3)
+    live = rig.controller.diagnostics()
+    assert (live["desired"], live["motor"], live["state"]) == ("open", "up", "opening")
+    assert live["move_elapsed_s"] == 1.5 and live["motor_outputs"]["motor_ena"] is True
+    rig.controller.command(DesiredState.CLOSED)
+    rig.step(2)
+    assert rig.controller.diagnostics()["motor"] == "down"
+    rig.switch("open")
+    assert rig.controller.diagnostics()["switch"] == "open"
+    rig.upper()
+    assert rig.controller.diagnostics()["upper_endstop"] is True
+
+
+def test_debug_workers_and_sensors(app):
+    app.environment.poll()
+    d = debug_payload(app)
+    assert d["sensors"]["temp_in"]["value"] == 21.5
+    assert d["workers"] == [] or {"name", "alive", "errors"} <= set(d["workers"][0])

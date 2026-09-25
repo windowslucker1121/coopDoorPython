@@ -13,7 +13,7 @@ from playwright.sync_api import expect
 
 NAV = {"home": "Home", "climate": "Climate", "history": "History", "camera": "Camera",
        "schedule": "Schedule & location", "network": "Network", "hardware": "Door & hardware",
-       "logs": "Logs", "system": "System & updates"}
+       "logs": "Logs", "system": "System & updates", "internals": "Live internals"}
 
 
 def door_title(page):
@@ -28,7 +28,7 @@ def test_sidebar_navigation_reaches_every_page(ui):
         expect(page.locator(f"#sidenav [data-nav={route}]")).to_have_attribute("aria-current", "page")
         expect(page.locator("#page")).to_have_attribute("data-page", route)
     expect(page.locator("[data-conn-text]").first).to_have_text("Connected · live")
-    expect(page).to_have_title("System & updates · Dinky Coop")
+    expect(page).to_have_title("Live internals · Dinky Coop")
 
 
 @pytest.mark.parametrize("path", ["/debug", "/mock"])

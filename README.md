@@ -32,11 +32,12 @@ and can be installed to the home screen as an app.
 | **Climate** | Coop, outside and controller temperatures with today's chart |
 | **History** | Charts of any logged day with door open/closed bands, recent door events |
 | **Camera** | Live picture, fullscreen |
-| **Schedule & location** | Mode, sunrise/sunset offsets, fixed times, city search or coordinates |
+| **Schedule & location** | Mode, sunrise/sunset offsets, fixed times; location by city search, coordinates or **Use my location** |
 | **Network** | Wi-Fi status, scan, save and connect; fallback hotspot |
 | **Door & hardware** | Calibration, test error, live GPIO pins, pin configuration, door simulator (mock hardware) |
 | **Logs** | Search and filter the log files by level and component |
 | **System & updates** | Device health, clock, update, restart, theme, push notifications |
+| **Live internals** | The door's state machine, motor and endstop wiring, move timer, workers, sensors and every setting - updating live |
 
 Problems show up as banners on every page with a button that fixes them
 (calibrate, clear error, set the clock, …).
@@ -77,6 +78,12 @@ Open http://127.0.0.1:5000, press **Calibrate now** and watch the simulated
 door move. *Door & hardware* has a simulator panel to hold the manual switch
 and press the endstops by hand. `simulator_travel_s: 3` in `config.yaml`
 makes the simulated door faster.
+
+**Use my location** fills in the location form from the phone's position.
+Browsers only share the exact position with `https://` pages (or
+`localhost`); on a plain `http://` address the app falls back to the
+device's time zone and picks the matching city, so check the result before
+saving.
 
 ### Command line
 

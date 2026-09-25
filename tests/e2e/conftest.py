@@ -24,7 +24,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 APP = os.path.join(ROOT, "src", "app.py")
 CHROMIUM_CANDIDATES = [os.environ.get("COOP_E2E_CHROMIUM", ""), "/opt/pw-browsers/chromium"]
 
-pytestmark = pytest.mark.e2e
+
+
+def pytest_collection_modifyitems(items):
+    here = os.path.dirname(__file__)
+    for item in items:
+        if str(item.fspath).startswith(here):
+            item.add_marker(pytest.mark.e2e)
 
 BASE_CONFIG = """\
 use_mock_hardware: true

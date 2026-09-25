@@ -295,6 +295,18 @@ code. Chart.js and the Socket.IO client are vendored in `static/js/`.
   that finishes after the user moved on only touches a detached node.
 * **Live data** arrives on the `data` event every second; commands use
   Socket.IO acknowledgements, settings with REST endpoints use `fetch`.
+* **Live internals** (`#/internals`) polls `get_debug_data` every second,
+  twice a second while the motor runs and immediately when the pushed door
+  status changes, and draws it: the state machine (current and target
+  state), motor/endstop/switch "LEDs", position and motor-run budget, retry
+  count, workers, sensors, system and the filterable configuration. Changed
+  values flash. The `live` block of the debug payload comes from
+  `DoorController.diagnostics()`.
+* **Use my location** (Schedule): `navigator.geolocation` on secure
+  origins, the nearest known city within 50 km names the place; otherwise
+  (plain http, blocked, unavailable) the city is guessed from the browser's
+  time zone. Zones are compared by their winter/summer UTC offsets because
+  astral lists legacy names such as `US/Central`.
 * **Banners** (fault, calibrate, calibrating, switch override, blocked
   door, clock mismatch, offline) appear on every page with a fixing action.
 * **Service worker:** network-first for the page with the cached shell or
@@ -307,8 +319,8 @@ code. Chart.js and the Socket.IO client are vendored in `static/js/`.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest -m "not e2e"                      # 452 unit tests, ~6 s
-pytest tests/e2e                         # 41 browser tests, ~90 s (Playwright + Chromium)
+pytest -m "not e2e"                      # 454 unit tests, ~6 s
+pytest tests/e2e                         # 57 browser tests, ~2 min (Playwright + Chromium)
 pytest --cov=src                         # ≈92 % (coop package ≈95 %)
 echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app with door simulator
 ```
@@ -326,6 +338,7 @@ echo "use_mock_hardware: true" > config.yaml && python src/app.py   # full app w
 | `test_application.py` | Wiring, workers, camera, CLI, and an **end-to-end day** on the simulator with a fake clock |
 | `test_door_events.py` | The controller's event feed and how events are attributed (manual, switch, sun, timer) |
 | `e2e/test_e2e_door.py` | In a real browser against the real server: navigation, door commands, calibration, modes, fault / override / clock / offline banners, simulator panel |
+| `e2e/test_e2e_live.py` | Live internals (updates without interaction, follows a door move, fault, switch, pause, filter, copy) and every Use-my-location path |
 | `e2e/test_e2e_pages.py` | Every settings form (valid and invalid input), charts, camera, network, pins, logs filters, system actions, theme, service worker, phone layout, dark mode |
 
 **Extending:**
