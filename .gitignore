@@ -22,3 +22,8 @@ config.yaml
 src/log.txt
 log.txt
 version.txt
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

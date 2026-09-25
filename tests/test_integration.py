@@ -878,9 +878,9 @@ class TestBasicDoorMovement:
         stored in global_vars.  Both must be populated for the timeout logic to
         use the desired small budget.
 
-        Budget = 0.5 s reference + 1 s margin = 1.5 s.
-        thread_sleep_time = 0.5 s  →  error fires on step 5
-        (count sequence: 0 → 0.5 → 1.0 → 1.5 → 2.0 > 1.5 → error).
+        Budget = 0.5 s reference + ``DOOR_MOVE_MAX_AFTER_ENDSTOPS`` margin.
+        Each step adds ``thread_sleep_time`` (0.5 s) to the move counter; the
+        error fires on the first step where the counter exceeds the budget.
         """
         _init_gv(
             auto_mode="False",
@@ -893,10 +893,16 @@ class TestBasicDoorMovement:
         door.reference_door_endstops_ms = 500
         runner = _make_runner(door)
 
-        for _ in range(5):
+        budget_s = 0.5 + runner.DOOR_MOVE_MAX_AFTER_ENDSTOPS
+        steps_within_budget = int(budget_s / runner.thread_sleep_time) + 1
+        for _ in range(steps_within_budget):
             runner.step()
+        assert door.ErrorState() is False, "error fired before budget exhausted"
+
+        runner.step()
 
         assert door.ErrorState() is True
+        assert door.errorState == "Endstop not reached"
 
 
 # ── Timer Mode ─────────────────────────────────────────────────────────────────
@@ -934,7 +940,10 @@ class TestTimerMode:
         runner.step()
         runner.step()
         assert door.get_state() == "closing"
-        
+
+        # Premature-endstop detection is active in timer mode too: simulate a
+        # full-length travel so the close is accepted as genuine.
+        door.startedMovingTime = time.time() - REF_MS / 1000.0
         _trigger_lower()
         runner.step()
         assert door.get_state() == "closed"
