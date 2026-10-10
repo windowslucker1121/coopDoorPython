@@ -81,7 +81,7 @@ def test_debug_payload(app):
     assert pins == sorted(pins)
     assert {p["name"] for p in d["pins"]} >= {"motor_in1", "endstop_up", "dht22_power"}
     assert next(p for p in d["pins"] if p["name"] == "dht11_data")["state"] == "N/A"
-    assert d["door_constants"]["in1 (Motor UP)"] == 17
+    assert d["door_constants"]["in1 (Motor DOWN)"] == 17
     g = d["global_vars"]
     assert g["door.state"] == "stopped" and g["config.wifi"]["password"] == "********"
     assert "password_hash" not in str(g["config.auth"])

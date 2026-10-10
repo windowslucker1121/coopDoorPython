@@ -110,8 +110,8 @@ def dashboard_payload(app: "Application") -> dict:
 
 
 _PIN_INFO = (
-    ("motor_in1", "Motor UP", "OUT"),
-    ("motor_in2", "Motor DOWN", "OUT"),
+    ("motor_in1", "Motor DOWN (close)", "OUT"),
+    ("motor_in2", "Motor UP (open)", "OUT"),
     ("motor_ena", "Motor Enable", "OUT"),
     ("endstop_up", "Endstop UP", "IN"),
     ("endstop_down", "Endstop DOWN", "IN"),
@@ -148,8 +148,8 @@ def debug_payload(app: "Application") -> dict:
                      "state": state, "mode": direction})
 
     door_constants = {
-        "in1 (Motor UP)": s.gpio.motor_in1,
-        "in2 (Motor DOWN)": s.gpio.motor_in2,
+        "in1 (Motor DOWN)": s.gpio.motor_in1,
+        "in2 (Motor UP)": s.gpio.motor_in2,
         "ena (Motor Enable)": s.gpio.motor_ena,
         "end_up (Endstop UP)": s.gpio.endstop_up,
         "end_down (Endstop DOWN)": s.gpio.endstop_down,

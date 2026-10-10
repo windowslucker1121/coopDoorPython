@@ -130,7 +130,7 @@ def test_mock_panel_events(app, sio):
     app.driver.open()
     sio.emit("mock_get_outputs")
     [[outputs]] = received(sio, "mock_update_outputs")
-    assert outputs == {"17": "LOW", "27": "LOW", "22": "HIGH"}  # opening
+    assert outputs == {"17": "LOW", "27": "HIGH", "22": "HIGH"}  # opening
 
 
 def test_mock_events_ignored_on_real_hardware(app, sio):

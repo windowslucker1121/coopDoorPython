@@ -1,12 +1,14 @@
 """GPIO-level door driver: motor, endstops, manual override switch.
 
-Wiring (H-bridge):
+Wiring (L298N H-bridge, ``in1`` / ``in2`` drive one channel, ``ena`` is its
+enable).  The two direction inputs are always *opposite* each other; a motor
+only turns when they differ.  Equal inputs (or ``ena`` LOW) stop it.
 
 =========  =====  =====  =====
 action     in1    in2    ena
 =========  =====  =====  =====
-open (up)  LOW    LOW    HIGH
-close      HIGH   HIGH   HIGH
+open (up)  LOW    HIGH   HIGH
+close      HIGH   LOW    HIGH
 stop       LOW    LOW    LOW
 =========  =====  =====  =====
 
@@ -89,8 +91,10 @@ class DoorDriver:
     def _drive(self, direction: DoorState) -> None:
         p = self._pins
         closing = direction is DoorState.CLOSING
+        # L298N H-bridge: the two inputs must be opposite for the motor to
+        # turn.  in1 HIGH / in2 LOW = close; in1 LOW / in2 HIGH = open.
         self._gpio.write(p.motor_in1, closing)
-        self._gpio.write(p.motor_in2, closing)
+        self._gpio.write(p.motor_in2, not closing)
         self._gpio.write(p.motor_ena, True)
         if self.state is not direction:
             self.move_started = self._clock.monotonic()

@@ -51,7 +51,7 @@ class TestSetup:
         pins = replace(PINS, motor_in1=2, motor_in2=3, motor_ena=4, endstop_up=7, endstop_down=8)
         d = DoorDriver(gpio, pins, clock)
         d.open()
-        assert (gpio.read(2), gpio.read(3), gpio.read(4)) == (False, False, True)
+        assert (gpio.read(2), gpio.read(3), gpio.read(4)) == (False, True, True)
         gpio.trigger(7, True)
         d.sync()
         assert d.state is DoorState.OPEN
@@ -62,13 +62,13 @@ class TestMotor:
     def test_open(self, drv, gpio, clock):
         drv.open()
         assert drv.state is DoorState.OPENING
-        assert motor(gpio) == (False, False, True)
+        assert motor(gpio) == (False, True, True)  # in1 LOW, in2 HIGH, ena HIGH
         assert drv.move_started == clock.monotonic()
 
     def test_close(self, drv, gpio):
         drv.close()
         assert drv.state is DoorState.CLOSING
-        assert motor(gpio) == (True, True, True)
+        assert motor(gpio) == (True, False, True)  # in1 HIGH, in2 LOW, ena HIGH
 
     def test_stop(self, drv, gpio):
         drv.open()
@@ -138,13 +138,13 @@ class TestEndstops:
     def test_edge_of_other_endstop_ignored(self, drv, gpio):
         drv.open()
         gpio.trigger(24, True)  # door leaving the lower endstop
-        assert motor(gpio) == (False, False, True)
+        assert motor(gpio) == (False, True, True)
 
     def test_edge_ignored_in_fault_and_reference(self, drv, gpio):
         drv.close()
         drv.reference_active = True
         gpio.trigger(24, True)
-        assert motor(gpio) == (True, True, True)
+        assert motor(gpio) == (True, False, True)
 
     def test_poll_catches_missed_edge(self, drv, gpio):
         drv.close()
